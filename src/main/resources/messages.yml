@@ -1,0 +1,36 @@
+prefix: "<gradient:#9333ea:#3b82f6>SkySignals</gradient>"
+
+meteor:
+  start: "<yellow>☄ SIGNAL CÉLESTE</yellow>\n<gray>Une météorite vient d'entrer dans l'atmosphère !</gray>\n<gray>📍 Direction : <white>%direction%</white></gray>"
+  end: "<green>La météorite s'est dissipée.</green>"
+  bossbar: "☄ Météorite - %time%"
+
+storm:
+  start: "<aqua>🌩 Un orage rare traverse le ciel !"
+  end: "<green>L'orage céleste se dissipe.</gray>"
+  bossbar: "🌩 Orage - %time%"
+
+sky-chest:
+  start: "<gold>🎁 Une caisse céleste vient d'apparaître !</gold>"
+  end: "<green>La caisse céleste s'est évaporée.</green>"
+  bossbar: "🎁 Caisse Céleste - %time%"
+
+mob-invasion:
+  start: "<red>👾 Une invasion de créatures commence !</red>"
+  end: "<green>L'invasion est repoussée.</green>"
+  bossbar: "👾 Invasion - %time%"
+
+mineral-rain:
+  start: "<aqua>💎 Une pluie de minerais commence !</aqua>"
+  end: "<green>La pluie de minerais cesse.</green>"
+  bossbar: "💎 Pluie de Minerais - %time%"
+
+growth-boost:
+  start: "<green>🌱 La croissance céleste commence !</green>"
+  end: "<green>La croissance céleste prend fin.</green>"
+  bossbar: "🌱 Croissance - %time%"
+
+no-permission: "<red>Vous n'avez pas la permission.</red>"
+reloaded: "<green>Configuration rechargée.</green>"
+event-started: "<green>Événement <white>%event%</white> démarré.</green>"
+event-stopped: "<green>Événement arrêté.</green>"

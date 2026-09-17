@@ -1,0 +1,110 @@
+buildscript {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+    dependencies {
+        classpath('org.ow2.asm:asm:9.7')
+        classpath('org.ow2.asm:asm-tree:9.7')
+        classpath('org.ow2.asm:asm-commons:9.7')
+        classpath('org.ow2.asm:asm-util:9.7')
+    }
+}
+
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+    id 'maven-publish'
+}
+
+group = 'com.valorsky'
+version = '1.0.0'
+description = 'Dynamic celestial events for ValorSky'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+    maven { url = 'https://repo.codemc.org/repository/maven-public/' }
+}
+
+ext {
+    paperVersion = '1.21.11-R0.1-SNAPSHOT'
+    adventureVersion = '4.20.0'
+    caffeineVersion = '3.2.0'
+    lettuceVersion = '6.5.2.RELEASE'
+    rabbitVersion = '5.21.0'
+    hikariVersion = '5.1.0'
+    gsonVersion = '2.10.1'
+    junitVersion = '5.11.4'
+    mockitoVersion = '5.14.2'
+}
+
+dependencies {
+    compileOnly "io.papermc.paper:paper-api:${paperVersion}"
+    compileOnly "net.kyori:adventure-api:${adventureVersion}"
+    compileOnly "net.kyori:adventure-text-minimessage:${adventureVersion}"
+    compileOnly "net.kyori:adventure-text-serializer-plain:${adventureVersion}"
+    compileOnly "org.jetbrains:annotations:26.0.2"
+
+    implementation "com.github.ben-manes.caffeine:caffeine:${caffeineVersion}"
+    implementation "io.lettuce:lettuce-core:${lettuceVersion}"
+    implementation "com.rabbitmq:amqp-client:${rabbitVersion}"
+    implementation "com.zaxxer:HikariCP:${hikariVersion}"
+    implementation "com.google.code.gson:gson:${gsonVersion}"
+
+    testImplementation "io.papermc.paper:paper-api:${paperVersion}"
+    testImplementation "org.junit.jupiter:junit-jupiter:${junitVersion}"
+    testImplementation "org.mockito:mockito-core:${mockitoVersion}"
+    testImplementation "org.mockito:mockito-junit-jupiter:${mockitoVersion}"
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events 'FAILED', 'SKIPPED'
+    }
+}
+
+configurations {
+    shadow {
+        resolutionStrategy {
+            force 'org.ow2.asm:asm:9.7'
+            force 'org.ow2.asm:asm-tree:9.7'
+            force 'org.ow2.asm:asm-commons:9.7'
+            force 'org.ow2.asm:asm-util:9.7'
+        }
+    }
+}
+
+shadowJar {
+    archiveFileName = "ValorSky-SkySignals-${version}.jar"
+    destinationDirectory = file('build/libs')
+    relocate 'com.github.benmanes.caffeine', 'com.valorsky.shaded.caffeine'
+    relocate 'io.lettuce.core', 'com.valorsky.shaded.lettuce'
+    relocate 'com.rabbitmq', 'com.valorsky.shaded.rabbitmq'
+    relocate 'com.zaxxer.hikari', 'com.valorsky.shaded.hikari'
+    relocate 'com.google.gson', 'com.valorsky.shaded.gson'
+    mergeServiceFiles()
+}
+
+build.finalizedBy(shadowJar)
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from components.java
+            artifactId = 'valor-sky-skysignals'
+        }
+    }
+    repositories {
+        mavenCentral()
+    }
+}

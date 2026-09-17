@@ -1,0 +1,8 @@
+* text=auto
+*.java text
+*.yml text
+*.yaml text
+*.md text
+*.json text
+*.sql text
+*.properties text

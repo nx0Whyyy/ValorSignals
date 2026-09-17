@@ -1,0 +1,11 @@
+-- V1__create_events_table.sql
+CREATE TABLE IF NOT EXISTS sky_signals_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    event_id VARCHAR(36) NOT NULL UNIQUE,
+    type VARCHAR(32) NOT NULL,
+    server VARCHAR(64) NOT NULL,
+    started_at TIMESTAMP NOT NULL,
+    ended_at TIMESTAMP NULL,
+    status VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

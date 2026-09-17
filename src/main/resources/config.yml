@@ -1,0 +1,148 @@
+server:
+  id: "SkyBlock-01"
+
+debug: false
+
+scheduler:
+  enabled: true
+  min-interval: 300
+  max-interval: 900
+  allowed-events:
+    - METEOR
+    - STORM
+    - SKY_CHEST
+    - MOB_INVASION
+    - MINERAL_RAIN
+    - GROWTH_BOOST
+
+events:
+  allow-concurrent: false
+  max-active: 1
+
+  meteor:
+    enabled: true
+    duration: 180
+
+  storm:
+    enabled: true
+    duration: 120
+
+  sky-chest:
+    enabled: true
+    duration: 300
+    loot:
+      - material: DIAMOND
+        weight: 10
+        amount-min: 1
+        amount-max: 2
+      - material: GOLD_INGOT
+        weight: 30
+        amount-min: 3
+        amount-max: 6
+      - material: IRON_INGOT
+        weight: 50
+        amount-min: 5
+        amount-max: 10
+      - material: EMERALD
+        weight: 15
+        amount-min: 1
+        amount-max: 3
+
+  mob-invasion:
+    enabled: true
+    duration: 300
+    waves: 3
+    mobs:
+      ZOMBIE: 5
+      SKELETON: 5
+      CREEPER: 2
+
+  mineral-rain:
+    enabled: true
+    duration: 120
+    max-drops: 50
+    drops:
+      DIAMOND:
+        weight: 5
+      GOLD_INGOT:
+        weight: 15
+      IRON_INGOT:
+        weight: 25
+      COAL:
+        weight: 40
+
+  growth-boost:
+    enabled: true
+    duration: 300
+    multiplier: 2.0
+
+redis:
+  enabled: true
+  uri: "redis://localhost:6379"
+  password: "${REDIS_PASSWORD}"
+  channel: "valorsky.skysignals"
+
+rabbitmq:
+  enabled: true
+  host: "localhost"
+  port: 5672
+  username: "${RABBITMQ_USERNAME}"
+  password: "${RABBITMQ_PASSWORD}"
+  exchange: "valorsky.skysignals"
+
+database:
+  host: "${DB_HOST}"
+  port: 3306
+  database: "valorsky"
+  username: "${DB_USERNAME}"
+  password: "${DB_PASSWORD}"
+  pool-size: 10
+
+cache:
+  maximum-size: 100
+  expire-after-minutes: 10
+
+notifications:
+  chat: true
+  actionbar: true
+  bossbar: true
+  sound: true
+  particles: true
+
+rewards:
+  meteor:
+    money:
+      min: 100
+      max: 500
+    commands:
+      - "give %player% diamond 1"
+    items:
+      - material: GOLD_INGOT
+        amount: 3
+
+  storm:
+    money:
+      min: 50
+      max: 200
+
+  sky-chest:
+    money:
+      min: 200
+      max: 800
+    commands:
+      - "give %player% diamond 1"
+
+  mob-invasion:
+    money:
+      min: 150
+      max: 600
+
+  mineral-rain:
+    money:
+      min: 80
+      max: 300
+
+  growth-boost:
+    money:
+      min: 50
+      max: 150
