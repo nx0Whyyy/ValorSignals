@@ -48,16 +48,15 @@ public final class FoliaScheduler {
     }
 
     private static Object getGlobalRegionScheduler() {
+        Object server = Bukkit.getServer();
         try {
-            Method method = Bukkit.class.getMethod("getGlobalRegionScheduler");
-            return method.invoke(null);
+            return Bukkit.class.getMethod("getGlobalRegionScheduler").invoke(null);
         } catch (Exception e1) {
             try {
-                Method method = Bukkit.class.getMethod("getGlobalScheduler");
-                return method.invoke(null);
+                return server.getClass().getMethod("getGlobalRegionScheduler").invoke(server);
             } catch (Exception e2) {
                 try {
-                    return Bukkit.getServer().getClass().getMethod("getGlobalRegionScheduler").invoke(Bukkit.getServer());
+                    return server.getClass().getMethod("getGlobalScheduler").invoke(server);
                 } catch (Exception e3) {
                     return null;
                 }
