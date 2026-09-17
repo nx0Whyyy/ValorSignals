@@ -7,6 +7,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
+import java.lang.reflect.Method;
 import java.util.concurrent.CompletableFuture;
 
 public final class FoliaScheduler {
@@ -50,12 +51,22 @@ public final class FoliaScheduler {
             CompletableFuture<?> future = world.getChunkAtAsync(location);
             Object chunk = future.getNow(null);
             if (chunk != null) {
-                return chunk.getClass().getMethod("getScheduler").invoke(chunk);
+                Method getScheduler = chunk.getClass().getMethod("getScheduler");
+                return getScheduler.invoke(chunk);
             }
-            return null;
         } catch (Exception e) {
             return null;
         }
+        try {
+            Object globalSched = getGlobalRegionScheduler();
+            if (globalSched != null) {
+                Method getRegionSched = Bukkit.class.getMethod("getRegionScheduler", World.class);
+                return getRegionSched.invoke(null, world);
+            }
+        } catch (Exception e) {
+            return null;
+        }
+        return null;
     }
 
     private static Object getEntityScheduler(Entity entity) {
@@ -124,6 +135,8 @@ public final class FoliaScheduler {
                     return;
                 }
             } catch (Exception ignored) {}
+            runGlobal(plugin, task);
+            return;
         }
         Bukkit.getScheduler().runTask(plugin, task);
     }
@@ -139,6 +152,8 @@ public final class FoliaScheduler {
                     return;
                 }
             } catch (Exception ignored) {}
+            runGlobalDelayed(plugin, task, delay);
+            return;
         }
         Bukkit.getScheduler().runTaskLater(plugin, task, delay);
     }
@@ -154,6 +169,7 @@ public final class FoliaScheduler {
                     return new TaskHandle(handle);
                 }
             } catch (Exception ignored) {}
+            return runGlobalRepeating(plugin, task, delay, period);
         }
         BukkitTask bukkitTask = Bukkit.getScheduler().runTaskTimer(plugin, task, delay, period);
         return new TaskHandle(bukkitTask);
@@ -174,6 +190,8 @@ public final class FoliaScheduler {
                     return;
                 }
             } catch (Exception ignored) {}
+            runGlobal(plugin, task);
+            return;
         }
         Bukkit.getScheduler().runTask(plugin, task);
     }
@@ -189,6 +207,8 @@ public final class FoliaScheduler {
                     return;
                 }
             } catch (Exception ignored) {}
+            runGlobalDelayed(plugin, task, delay);
+            return;
         }
         Bukkit.getScheduler().runTaskLater(plugin, task, delay);
     }
