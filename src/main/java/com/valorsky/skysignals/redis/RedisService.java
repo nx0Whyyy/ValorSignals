@@ -4,6 +4,7 @@ import com.valorsky.skysignals.config.Config;
 import com.valorsky.skysignals.model.EventState;
 import com.valorsky.skysignals.model.SkyEventStatus;
 import com.valorsky.skysignals.model.SkyEventType;
+import com.valorsky.skysignals.util.FoliaScheduler;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import io.lettuce.core.RedisClient;
@@ -13,24 +14,20 @@ import io.lettuce.core.api.sync.RedisCommands;
 import io.lettuce.core.pubsub.api.async.RedisPubSubAsyncCommands;
 import io.lettuce.core.pubsub.RedisPubSubListener;
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
+import org.bukkit.plugin.java.JavaPlugin;
 
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class RedisService {
 
+    private final JavaPlugin plugin;
     private final Config config;
     private final Logger logger;
     private final Gson gson;
-    private final Executor asyncExecutor = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "SkySignals-Redis-Async");
-        t.setDaemon(true);
-        return t;
-    });
 
     private RedisClient client;
     private io.lettuce.core.api.StatefulRedisConnection<String, String> connection;
@@ -40,11 +37,12 @@ public final class RedisService {
     private RedisPubSubAsyncCommands<String, String> pubSubAsync;
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private final String prefix = "skysignals:";
-    private final List<RedisEventListener> listeners = new ArrayList<>();
+    private final List<RedisEventListener> listeners = java.util.Collections.synchronizedList(new ArrayList<>());
     private volatile boolean reconnecting = false;
     private volatile boolean shutdown = false;
 
-    public RedisService(Config config, Logger logger) {
+    public RedisService(JavaPlugin plugin, Config config, Logger logger) {
+        this.plugin = plugin;
         this.config = config;
         this.gson = new GsonBuilder()
                 .registerTypeAdapter(Instant.class, new InstantAdapter())
@@ -137,7 +135,7 @@ public final class RedisService {
         if (!connected.get() || shutdown) {
             return;
         }
-        asyncExecutor.execute(() -> {
+        FoliaScheduler.runAsync(plugin, () -> {
             try {
                 String key = prefix + "event:" + state.id();
                 Map<String, String> data = new HashMap<>();
@@ -165,7 +163,7 @@ public final class RedisService {
 
     public void removeEventState(String eventId) {
         if (!connected.get() || shutdown) return;
-        asyncExecutor.execute(() -> {
+        FoliaScheduler.runAsync(plugin, () -> {
             try {
                 async.del(prefix + "event:" + eventId);
             } catch (Exception e) {
@@ -218,34 +216,38 @@ public final class RedisService {
     private void scheduleReconnect() {
         if (reconnecting || shutdown) return;
         reconnecting = true;
+        retryConnect();
+    }
 
-        Thread t = new Thread(() -> {
-            while (!connected.get() && !shutdown) {
-                try {
-                    Thread.sleep(5000);
-                    if (shutdown) break;
-                    RedisURI uri = RedisURI.create(config.redisUri());
-                    if (!config.redisPassword().isEmpty()) {
-                        uri.setPassword(config.redisPassword().toCharArray());
-                    }
-                    client = RedisClient.create(uri);
-                    connection = client.connect();
-                    sync = connection.sync();
-                    async = connection.async();
-                    connected.set(true);
-                    logger.info("Reconnected to Redis.");
-                    startPubSub();
-                    break;
-                } catch (Exception e) {
-                    if (shutdown) break;
+    private void retryConnect() {
+        if (shutdown || connected.get()) {
+            reconnecting = false;
+            return;
+        }
+        FoliaScheduler.runAsyncDelayed(plugin, () -> {
+            try {
+                RedisURI uri = RedisURI.create(config.redisUri());
+                if (!config.redisPassword().isEmpty()) {
+                    uri.setPassword(config.redisPassword().toCharArray());
+                }
+                client = RedisClient.create(uri);
+                connection = client.connect();
+                sync = connection.sync();
+                async = connection.async();
+                connected.set(true);
+                logger.info("Reconnected to Redis.");
+                startPubSub();
+            } catch (Exception e) {
+                if (!shutdown) {
                     logger.warning("Redis reconnection failed, retrying in 5s: " + e.getMessage());
+                    retryConnect();
+                }
+            } finally {
+                if (connected.get()) {
+                    reconnecting = false;
                 }
             }
-            reconnecting = false;
-        });
-        t.setName("SkySignals-Redis-Reconnect");
-        t.setDaemon(true);
-        t.start();
+        }, 100L);
     }
 
     public void disconnect() {

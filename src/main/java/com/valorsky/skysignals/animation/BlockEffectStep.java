@@ -1,9 +1,11 @@
 package com.valorsky.skysignals.animation;
 
+import com.valorsky.skysignals.util.FoliaScheduler;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.BlockData;
+import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.entity.Player;
 
 public record BlockEffectStep(
@@ -27,8 +29,10 @@ public record BlockEffectStep(
         if (onPlace != null) onPlace.accept(block);
 
         if (durationTicks > 0) {
-            context.getSequence().getPlugin().getServer().getScheduler().runTaskLater(
-                context.getSequence().getPlugin(), () -> {
+            FoliaScheduler.runRegionDelayed(
+                context.getSequence().getPlugin(),
+                loc,
+                () -> {
                     if (block.getType() == material) {
                         block.setBlockData(originalData);
                         if (onRemove != null) onRemove.accept(block);

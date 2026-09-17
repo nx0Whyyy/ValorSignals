@@ -1,28 +1,25 @@
 package com.valorsky.skysignals.rabbitmq;
 
 import com.valorsky.skysignals.model.EventState;
+import com.valorsky.skysignals.util.FoliaScheduler;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.rabbitmq.client.AMQP;
 import com.rabbitmq.client.Channel;
 
 import java.time.Instant;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.logging.Logger;
+import org.bukkit.plugin.java.JavaPlugin;
 
 public final class EventPublisher {
 
+    private final JavaPlugin plugin;
     private final RabbitManager rabbitManager;
     private final Logger logger;
     private final Gson gson;
-    private final Executor asyncExecutor = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "SkySignals-Rabbit-Publish");
-        t.setDaemon(true);
-        return t;
-    });
 
-    public EventPublisher(RabbitManager rabbitManager, Logger logger) {
+    public EventPublisher(JavaPlugin plugin, RabbitManager rabbitManager, Logger logger) {
+        this.plugin = plugin;
         this.rabbitManager = rabbitManager;
         this.logger = logger;
         this.gson = new GsonBuilder()
@@ -37,7 +34,7 @@ public final class EventPublisher {
             logger.warning("RabbitMQ not connected, cannot publish " + routingKey);
             return;
         }
-        asyncExecutor.execute(() -> {
+        FoliaScheduler.runAsync(plugin, () -> {
             try {
                 String message = gson.toJson(state);
                 Channel channel = rabbitManager.getChannel();

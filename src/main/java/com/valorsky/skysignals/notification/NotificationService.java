@@ -6,6 +6,7 @@ import com.valorsky.skysignals.model.NotificationLevel;
 import com.valorsky.skysignals.model.SkyEvent;
 import com.valorsky.skysignals.model.SkyEventType;
 import com.valorsky.skysignals.sound.SoundService;
+import com.valorsky.skysignals.util.FoliaScheduler;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
@@ -29,6 +30,7 @@ public final class NotificationService {
     private final BossBarService bossBarService;
     private final SoundService soundService;
     private final Map<UUID, String> activeBossBarIds = new ConcurrentHashMap<>();
+    private final Map<UUID, FoliaScheduler.TaskHandle> bossBarTasks = new ConcurrentHashMap<>();
 
     public NotificationService(
             JavaPlugin plugin,
@@ -129,17 +131,22 @@ public final class NotificationService {
         }
         bossBarService.create(bossBarId, title, 1.0f, audience);
 
-        plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
+        FoliaScheduler.TaskHandle taskHandle = FoliaScheduler.runGlobalTimer(plugin, () -> {
             String barId = activeBossBarIds.get(event.getId());
             if (barId != null) {
                 String formattedNow = template.replace("%time%", formatTime(event.getSecondsRemaining()));
                 bossBarService.update(barId, miniMessage.deserialize(formattedNow), (float) event.getProgress());
             }
         }, 20L, 20L);
+        bossBarTasks.put(event.getId(), taskHandle);
     }
 
     private void removeBossBar(UUID eventId) {
         String bossBarId = activeBossBarIds.remove(eventId);
+        FoliaScheduler.TaskHandle taskHandle = bossBarTasks.remove(eventId);
+        if (taskHandle != null) {
+            taskHandle.cancel();
+        }
         if (bossBarId != null) {
             bossBarService.remove(bossBarId);
         }
@@ -152,6 +159,10 @@ public final class NotificationService {
     }
 
     public void cleanup() {
+        for (FoliaScheduler.TaskHandle handle : bossBarTasks.values()) {
+            handle.cancel();
+        }
+        bossBarTasks.clear();
         for (String bossBarId : activeBossBarIds.values()) {
             bossBarService.remove(bossBarId);
         }

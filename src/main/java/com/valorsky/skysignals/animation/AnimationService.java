@@ -40,7 +40,6 @@ public final class AnimationService {
                     runStep(context);
                 }
             }, delay, 1);
-            context.setTask(null); // TaskHandle doesn't match BukkitTask
         } else {
             FoliaScheduler.runGlobal(plugin, () -> {
                 try {

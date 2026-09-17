@@ -1,19 +1,18 @@
 package com.valorsky.skysignals.rabbitmq;
 
 import com.valorsky.skysignals.config.Config;
+import com.valorsky.skysignals.util.FoliaScheduler;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 
-import java.io.IOException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
+import org.bukkit.plugin.java.JavaPlugin;
 
 public final class RabbitManager {
 
+    private final JavaPlugin plugin;
     private final Config config;
     private final Logger logger;
     private Connection connection;
@@ -21,13 +20,9 @@ public final class RabbitManager {
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private volatile boolean reconnecting = false;
     private volatile boolean shutdown = false;
-    private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "SkySignals-Rabbit-Admin");
-        t.setDaemon(true);
-        return t;
-    });
 
-    public RabbitManager(Config config, Logger logger) {
+    public RabbitManager(JavaPlugin plugin, Config config, Logger logger) {
+        this.plugin = plugin;
         this.config = config;
         this.logger = logger;
     }
@@ -38,64 +33,70 @@ public final class RabbitManager {
             logger.info("RabbitMQ disabled in configuration.");
             return;
         }
-        try {
-            ConnectionFactory factory = new ConnectionFactory();
-            factory.setHost(config.rabbitHost());
-            factory.setPort(config.rabbitPort());
-            factory.setUsername(config.rabbitUsername());
-            factory.setPassword(config.rabbitPassword());
+        FoliaScheduler.runAsync(plugin, () -> {
+            try {
+                ConnectionFactory factory = new ConnectionFactory();
+                factory.setHost(config.rabbitHost());
+                factory.setPort(config.rabbitPort());
+                factory.setUsername(config.rabbitUsername());
+                factory.setPassword(config.rabbitPassword());
 
-            connection = factory.newConnection("SkySignals-" + config.serverId());
-            channel = connection.createChannel();
+                connection = factory.newConnection("SkySignals-" + config.serverId());
+                channel = connection.createChannel();
 
-            channel.exchangeDeclare(config.rabbitExchange(), "topic", true);
-            String queue = config.rabbitExchange() + ".events." + config.serverId();
-            channel.queueDeclare(queue, true, false, false, null);
-            channel.queueBind(queue, config.rabbitExchange(), "event.*");
+                channel.exchangeDeclare(config.rabbitExchange(), "topic", true);
+                String queue = config.rabbitExchange() + ".events." + config.serverId();
+                channel.queueDeclare(queue, true, false, false, null);
+                channel.queueBind(queue, config.rabbitExchange(), "event.*");
 
-            connected.set(true);
-            logger.info("Connected to RabbitMQ.");
-        } catch (Exception e) {
-            logger.warning("Failed to connect to RabbitMQ: " + e.getMessage() + ". Will retry in background.");
-            connected.set(false);
-            scheduleReconnect();
-        }
+                connected.set(true);
+                logger.info("Connected to RabbitMQ.");
+            } catch (Exception e) {
+                logger.warning("Failed to connect to RabbitMQ: " + e.getMessage() + ". Will retry in background.");
+                connected.set(false);
+                scheduleReconnect();
+            }
+        });
     }
 
     private void scheduleReconnect() {
         if (reconnecting || shutdown) return;
         reconnecting = true;
+        retryConnect();
+    }
 
-        Thread t = new Thread(() -> {
-            while (!connected.get() && !shutdown) {
-                try {
-                    Thread.sleep(5000);
-                    if (shutdown) break;
-                    ConnectionFactory factory = new ConnectionFactory();
-                    factory.setHost(config.rabbitHost());
-                    factory.setPort(config.rabbitPort());
-                    factory.setUsername(config.rabbitUsername());
-                    factory.setPassword(config.rabbitPassword());
+    private void retryConnect() {
+        if (shutdown || connected.get()) {
+            reconnecting = false;
+            return;
+        }
+        FoliaScheduler.runAsyncDelayed(plugin, () -> {
+            try {
+                ConnectionFactory factory = new ConnectionFactory();
+                factory.setHost(config.rabbitHost());
+                factory.setPort(config.rabbitPort());
+                factory.setUsername(config.rabbitUsername());
+                factory.setPassword(config.rabbitPassword());
 
-                    connection = factory.newConnection("SkySignals-" + config.serverId());
-                    channel = connection.createChannel();
-                    channel.exchangeDeclare(config.rabbitExchange(), "topic", true);
-                    String queue = config.rabbitExchange() + ".events." + config.serverId();
-                    channel.queueDeclare(queue, true, false, false, null);
-                    channel.queueBind(queue, config.rabbitExchange(), "event.*");
-                    connected.set(true);
-                    logger.info("Reconnected to RabbitMQ.");
-                    break;
-                } catch (Exception e) {
-                    if (shutdown) break;
+                connection = factory.newConnection("SkySignals-" + config.serverId());
+                channel = connection.createChannel();
+                channel.exchangeDeclare(config.rabbitExchange(), "topic", true);
+                String queue = config.rabbitExchange() + ".events." + config.serverId();
+                channel.queueDeclare(queue, true, false, false, null);
+                channel.queueBind(queue, config.rabbitExchange(), "event.*");
+                connected.set(true);
+                logger.info("Reconnected to RabbitMQ.");
+            } catch (Exception e) {
+                if (!shutdown) {
                     logger.warning("RabbitMQ reconnection failed, retrying in 5s: " + e.getMessage());
+                    retryConnect();
+                }
+            } finally {
+                if (connected.get()) {
+                    reconnecting = false;
                 }
             }
-            reconnecting = false;
-        });
-        t.setName("SkySignals-Rabbit-Reconnect");
-        t.setDaemon(true);
-        t.start();
+        }, 100L);
     }
 
     public boolean isConnected() {
@@ -119,7 +120,6 @@ public final class RabbitManager {
             if (connection != null && connection.isOpen()) connection.close();
         } catch (Exception ignored) {
         }
-        executor.shutdownNow();
         logger.info("RabbitMQ disconnected.");
     }
 }

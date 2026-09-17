@@ -1,73 +1,69 @@
 package com.valorsky.skysignals.redis;
 
+import com.valorsky.skysignals.config.Config;
+import com.valorsky.skysignals.util.FoliaScheduler;
+import io.lettuce.core.RedisClient;
+import io.lettuce.core.SetArgs;
+import io.lettuce.core.api.sync.RedisCommands;
+import org.bukkit.plugin.java.JavaPlugin;
+
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
 
-import io.lettuce.core.RedisClient;
-import io.lettuce.core.RedisURI;
-import io.lettuce.core.SetArgs;
-import io.lettuce.core.api.sync.RedisCommands;
-
 public final class DistributedLockService {
 
+    private final JavaPlugin plugin;
+    private final Config config;
     private final RedisClient client;
-    private final RedisCommands<String, String> sync;
-    private final Executor asyncExecutor;
+    private volatile RedisCommands<String, String> sync;
     private final Logger logger;
     private final String lockPrefix = "lock:skysignals:";
     private final boolean enabled;
 
-    public DistributedLockService(RedisClient client, Logger logger) {
+    public DistributedLockService(JavaPlugin plugin, Config config, RedisClient client, Logger logger) {
+        this.plugin = plugin;
+        this.config = config;
         this.logger = logger;
         if (client == null) {
             this.client = null;
             this.sync = null;
-            this.asyncExecutor = Executors.newCachedThreadPool(r -> {
-                Thread t = new Thread(r, "SkySignals-Lock-Async");
-                t.setDaemon(true);
-                return t;
-            });
             this.enabled = false;
-            logger.warning("DistributedLockService created without Redis client. Locking disabled.");
+            logger.warning("Distributed lock service initialized without Redis client. Locking disabled.");
             return;
         }
         this.client = client;
-        RedisCommands<String, String> tmpSync = null;
         boolean tmpEnabled = false;
         try {
-            tmpSync = client.connect().sync();
+            this.sync = client.connect().sync();
             tmpEnabled = true;
             logger.info("Distributed lock service initialized.");
         } catch (Exception e) {
             logger.warning("Failed to initialize distributed lock service: " + e.getMessage());
         }
-        this.sync = tmpSync;
         this.enabled = tmpEnabled;
-        this.asyncExecutor = Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r, "SkySignals-Lock-Async");
-            t.setDaemon(true);
-            return t;
+    }
+
+    private CompletableFuture<Boolean> runAsync(Supplier<Boolean> action) {
+        CompletableFuture<Boolean> future = new CompletableFuture<>();
+        FoliaScheduler.runAsync(plugin, () -> {
+            try {
+                future.complete(action.get());
+            } catch (Exception e) {
+                future.completeExceptionally(e);
+            }
         });
+        return future;
     }
 
     public CompletableFuture<Boolean> tryLock(String lockName, Duration ttl) {
-        return CompletableFuture.supplyAsync(() -> {
-            if (!enabled || sync == null) {
-                return false;
-            }
-            String key = lockPrefix + lockName;
-            String value = System.currentTimeMillis() + ":" + Thread.currentThread().getId();
-            String acquired = sync.set(key, value, new SetArgs().nx().ex((int) ttl.getSeconds()));
-            return acquired != null;
-        }, asyncExecutor);
+        String ownerId = config.serverId() + ":" + System.currentTimeMillis();
+        return tryLock(lockName, ttl, ownerId);
     }
 
     public CompletableFuture<Boolean> tryLock(String lockName, Duration ttl, String ownerId) {
-        return CompletableFuture.supplyAsync(() -> {
+        return runAsync(() -> {
             if (!enabled || sync == null) {
                 return false;
             }
@@ -75,11 +71,11 @@ public final class DistributedLockService {
             String value = ownerId + ":" + System.currentTimeMillis();
             String acquired = sync.set(key, value, new SetArgs().nx().ex((int) ttl.getSeconds()));
             return acquired != null;
-        }, asyncExecutor);
+        });
     }
 
     public CompletableFuture<Boolean> releaseLock(String lockName, String ownerId) {
-        return CompletableFuture.supplyAsync(() -> {
+        return runAsync(() -> {
             if (!enabled || sync == null) {
                 return true;
             }
@@ -90,11 +86,11 @@ public final class DistributedLockService {
                 return true;
             }
             return false;
-        }, asyncExecutor);
+        });
     }
 
     public CompletableFuture<Boolean> extendLock(String lockName, Duration ttl, String ownerId) {
-        return CompletableFuture.supplyAsync(() -> {
+        return runAsync(() -> {
             if (!enabled || sync == null) {
                 return false;
             }
@@ -105,7 +101,7 @@ public final class DistributedLockService {
                 return true;
             }
             return false;
-        }, asyncExecutor);
+        });
     }
 
     public boolean isLocked(String lockName) {
@@ -129,28 +125,18 @@ public final class DistributedLockService {
     }
 
     public void shutdown() {
-        if (asyncExecutor instanceof java.util.concurrent.ExecutorService es) {
-            es.shutdown();
-        }
     }
 
-    // Execute with lock pattern
     public <T> CompletableFuture<T> executeWithLock(String lockName, Duration ttl, String ownerId, Supplier<T> action) {
         return tryLock(lockName, ttl, ownerId).thenCompose(acquired -> {
             if (!acquired && enabled) {
                 return CompletableFuture.failedFuture(new IllegalStateException("Could not acquire lock: " + lockName));
             }
-            if (!enabled) {
-                try {
-                    T result = action.get();
-                    return CompletableFuture.completedFuture(result);
-                } catch (Exception e) {
-                    return CompletableFuture.failedFuture(e);
-                }
-            }
             try {
                 T result = action.get();
                 return CompletableFuture.completedFuture(result);
+            } catch (Exception e) {
+                return CompletableFuture.failedFuture(e);
             } finally {
                 releaseLock(lockName, ownerId).join();
             }

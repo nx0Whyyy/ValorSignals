@@ -91,7 +91,7 @@ public final class SkySignalsPlugin extends JavaPlugin {
         locationService = new SafeLocationService(this, config, protectionProvider, islandProvider);
 
         // Database
-        databaseManager = new DatabaseManager(config, getLogger());
+        databaseManager = new DatabaseManager(this, config, getLogger());
         databaseManager.connect();
 
         EventRepository eventRepository = new EventRepository(
@@ -100,16 +100,16 @@ public final class SkySignalsPlugin extends JavaPlugin {
         );
 
         // Redis
-        redisService = new RedisService(config, getLogger());
+        redisService = new RedisService(this, config, getLogger());
         redisService.connect();
 
-        lockService = new DistributedLockService(redisService.getClient(), getLogger());
+        lockService = new DistributedLockService(this, config, redisService.getClient(), getLogger());
 
         // RabbitMQ
-        rabbitManager = new RabbitManager(config, getLogger());
+        rabbitManager = new RabbitManager(this, config, getLogger());
         rabbitManager.connect();
 
-        eventPublisher = new EventPublisher(rabbitManager, getLogger());
+        eventPublisher = new EventPublisher(this, rabbitManager, getLogger());
 
         // Reward service
         rewardService = new RewardService(this, config, databaseManager);
@@ -157,10 +157,22 @@ public final class SkySignalsPlugin extends JavaPlugin {
                     }
                 });
             });
+            getLogger().info("Redis: connected - distributed locking enabled.");
+        } else {
+            getLogger().info("Redis: unavailable - distributed locking disabled.");
         }
 
         if (rabbitManager.isConnected()) {
             eventConsumer.startConsuming();
+            getLogger().info("RabbitMQ: connected - messaging enabled.");
+        } else {
+            getLogger().info("RabbitMQ: unavailable - messaging disabled.");
+        }
+
+        if (databaseManager.isConnected()) {
+            getLogger().info("Database: connected - persistence enabled.");
+        } else {
+            getLogger().info("Database: unavailable - persistence disabled.");
         }
 
         api = new SkySignalsAPI(
@@ -180,8 +192,7 @@ public final class SkySignalsPlugin extends JavaPlugin {
 
         scheduler.start();
 
-        getLogger().info("Plugin enabled.");
-        getLogger().info("Registered " + factory.getRegisteredTypes().size() + " event types.");
+        getLogger().info("SkySignals enabled successfully. Registered " + factory.getRegisteredTypes().size() + " event types.");
     }
 
     private void registerEvents() {
