@@ -49,29 +49,48 @@ public final class FoliaScheduler {
 
     private static Object getGlobalRegionScheduler() {
         Object server = Bukkit.getServer();
+        if (logger != null) logger.info("[FoliaScheduler] Trying Bukkit.class.getMethod(getGlobalRegionScheduler) on " + Bukkit.class.getName());
         try {
-            return Bukkit.class.getMethod("getGlobalRegionScheduler").invoke(null);
+            Object result = Bukkit.class.getMethod("getGlobalRegionScheduler").invoke(null);
+            if (logger != null) logger.info("[FoliaScheduler] Bukkit.getGlobalRegionScheduler() OK");
+            return result;
         } catch (Exception e1) {
+            if (logger != null) logger.warning("[FoliaScheduler] Bukkit.class.getMethod failed: " + e1.getClass().getSimpleName() + " - " + e1.getMessage());
+            if (server != null && logger != null) logger.info("[FoliaScheduler] Trying server.getClass().getMethod on " + server.getClass().getName());
             try {
-                return server.getClass().getMethod("getGlobalRegionScheduler").invoke(server);
+                Object result = server.getClass().getMethod("getGlobalRegionScheduler").invoke(server);
+                if (logger != null) logger.info("[FoliaScheduler] server.getGlobalRegionScheduler() OK");
+                return result;
             } catch (Exception e2) {
+                if (logger != null) logger.warning("[FoliaScheduler] server.getMethod failed: " + e2.getClass().getSimpleName() + " - " + e2.getMessage());
                 try {
-                    return server.getClass().getMethod("getGlobalScheduler").invoke(server);
+                    return Bukkit.class.getMethod("getGlobalScheduler").invoke(null);
                 } catch (Exception e3) {
-                    return null;
+                    if (logger != null) logger.warning("[FoliaScheduler] Bukkit.getGlobalScheduler failed: " + e3.getClass().getSimpleName());
+                    try {
+                        return server.getClass().getMethod("getGlobalScheduler").invoke(server);
+                    } catch (Exception e4) {
+                        if (logger != null) logger.warning("[FoliaScheduler] server.getGlobalScheduler failed: " + e4.getClass().getSimpleName());
+                        return null;
+                    }
                 }
             }
         }
     }
 
     private static Object getAsyncScheduler() {
+        Object server = Bukkit.getServer();
         try {
             return Bukkit.class.getMethod("getAsyncScheduler").invoke(null);
         } catch (Exception e1) {
             try {
-                return Bukkit.getServer().getClass().getMethod("getAsyncScheduler").invoke(Bukkit.getServer());
+                return server.getClass().getMethod("getAsyncScheduler").invoke(server);
             } catch (Exception e2) {
-                return null;
+                try {
+                    return Bukkit.class.getMethod("getScheduler").invoke(null).getClass().getMethod("unwrap").invoke(null);
+                } catch (Exception e3) {
+                    return null;
+                }
             }
         }
     }
