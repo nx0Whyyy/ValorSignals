@@ -1,5 +1,5 @@
 name: ValorSky-SkySignals
-version: 1.0.0
+version: 1.0.1
 main: com.valorsky.skysignals.SkySignalsPlugin
 api-version: '1.21'
 foliation-supported: true
