@@ -5,6 +5,7 @@ import com.valorsky.skysignals.model.EventState;
 import com.valorsky.skysignals.model.SkyEvent;
 import com.valorsky.skysignals.model.SkyEventType;
 import com.valorsky.skysignals.model.SkyEventStatus;
+import com.valorsky.skysignals.model.EventScope;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -30,7 +31,7 @@ public final class SkyEventFactory {
         return creators.containsKey(type);
     }
 
-    public SkyEvent create(SkyEventType type, String serverId, Duration duration) {
+    public SkyEvent create(SkyEventType type, String serverId, Duration duration, EventContext context) {
         EventCreator creator = creators.get(type);
         if (creator == null) {
             throw new IllegalArgumentException("No creator registered for event type: " + type);
@@ -38,15 +39,18 @@ public final class SkyEventFactory {
         UUID id = UUID.randomUUID();
         Instant now = Instant.now();
         Instant end = now.plus(duration);
-        EventState state = new EventState(id, type, serverId, now, end, SkyEventStatus.SCHEDULED, Map.of());
-        return creator.create(state);
+        EventState state = new EventState(
+            id, type, serverId, EventScope.SERVER, now, now, end,
+            SkyEventStatus.SCHEDULED, com.valorsky.skysignals.model.SkyEventPhase.SCHEDULED, 0, Map.of()
+        );
+        return creator.create(state, context);
     }
 
-    public SkyEvent createFromState(EventState state) {
+    public SkyEvent createFromState(EventState state, EventContext context) {
         EventCreator creator = creators.get(state.type());
         if (creator == null) {
             throw new IllegalArgumentException("No creator registered for event type: " + state.type());
         }
-        return creator.create(state);
+        return creator.create(state, context);
     }
 }

@@ -32,7 +32,7 @@ class RedisSerializationTest {
         EventState state = new EventState(
                 UUID.randomUUID(), SkyEventType.METEOR, "SkyBlock-01",
                 Instant.ofEpochSecond(1750000000), Instant.ofEpochSecond(1750000300),
-                SkyEventStatus.ACTIVE, Map.of("key", "value")
+                 SkyEventStatus.ACTIVE, Map.<String, Object>of("key", "value")
         );
 
         String json = gson.toJson(state);
@@ -61,7 +61,7 @@ class RedisSerializationTest {
             EventState state = new EventState(
                     UUID.randomUUID(), type, "server",
                     Instant.now(), Instant.now().plusSeconds(300),
-                    SkyEventStatus.SCHEDULED, Map.of()
+                    SkyEventStatus.SCHEDULED, java.util.Collections.emptyMap()
             );
             String json = gson.toJson(state);
             EventState deserialized = gson.fromJson(json, EventState.class);
@@ -75,7 +75,7 @@ class RedisSerializationTest {
             EventState state = new EventState(
                     UUID.randomUUID(), SkyEventType.METEOR, "server",
                     Instant.now(), Instant.now().plusSeconds(300),
-                    status, Map.of()
+                    status, java.util.Collections.emptyMap()
             );
             String json = gson.toJson(state);
             EventState deserialized = gson.fromJson(json, EventState.class);
@@ -96,7 +96,7 @@ class RedisSerializationTest {
         EventState original = new EventState(
                 UUID.randomUUID(), SkyEventType.METEOR, "server",
                 Instant.now(), Instant.now().plusSeconds(300),
-                SkyEventStatus.SCHEDULED, Map.of("custom", "data")
+                 SkyEventStatus.SCHEDULED, Map.<String, Object>of("custom", "data")
         );
         EventState updated = original.withStatus(SkyEventStatus.ACTIVE);
         assertEquals(SkyEventStatus.ACTIVE, updated.status());

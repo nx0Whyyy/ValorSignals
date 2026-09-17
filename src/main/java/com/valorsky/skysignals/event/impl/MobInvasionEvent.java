@@ -1,151 +1,253 @@
 package com.valorsky.skysignals.event.impl;
 
 import com.valorsky.skysignals.event.AbstractSkyEvent;
-import com.valorsky.skysignals.model.EventState;
-import com.valorsky.skysignals.model.SkyEventStatus;
+import com.valorsky.skysignals.event.SkyEventManager;
+import com.valorsky.skysignals.model.*;
 import com.valorsky.skysignals.notification.NotificationService;
-import com.valorsky.skysignals.util.PositionUtils;
+import com.valorsky.skysignals.particle.ParticleService;
+import com.valorsky.skysignals.reward.RewardService;
+import com.valorsky.skysignals.sound.SoundService;
+import com.valorsky.skysignals.config.Config;
 import com.valorsky.skysignals.util.FoliaScheduler;
-import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.NamespacedKey;
-import org.bukkit.World;
-import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.entity.Entity;
+import com.valorsky.skysignals.util.FoliaScheduler.TaskHandle;
+import com.valorsky.skysignals.location.SafeLocationService;
+import org.bukkit.*;
+import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Entity;
+import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 
-import java.util.HashSet;
-import java.util.Random;
-import java.util.Set;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
 public final class MobInvasionEvent extends AbstractSkyEvent {
 
-    private final NamespacedKey spawnTagKey;
     private final NotificationService notificationService;
+    private final RewardService rewardService;
+    private final ParticleService particleService;
+    private final SoundService soundService;
+    private final SafeLocationService locationService;
+    private final Config config;
     private final Logger logger;
-    private final Set<Entity> spawnedMobs = new HashSet<>();
-    private transient boolean waveScheduled = false;
-    private int currentWave = 0;
-    private int maxWaves;
-    private Location center;
-    private World world;
 
-    public MobInvasionEvent(EventState state, JavaPlugin plugin, NotificationService notificationService) {
+    private Location spawnCenter;
+    private final List<LivingEntity> spawnedMobs = Collections.synchronizedList(new ArrayList<>());
+    private TaskHandle waveTask;
+    private TaskHandle checkTask;
+    private final AtomicInteger currentWave = new AtomicInteger(0);
+    private final AtomicInteger mobsRemaining = new AtomicInteger(0);
+    private final Config.MobWaveConfig[] waves;
+    private final int maxMobs;
+    private final Set<UUID> rewardedPlayers = ConcurrentHashMap.newKeySet();
+
+    public MobInvasionEvent(EventState state, JavaPlugin plugin, NotificationService notificationService,
+                            RewardService rewardService, ParticleService particleService,
+                            SoundService soundService, SafeLocationService locationService, Config config) {
         super(state, plugin);
         this.notificationService = notificationService;
+        this.rewardService = rewardService;
+        this.particleService = particleService;
+        this.soundService = soundService;
+        this.locationService = locationService;
+        this.config = config;
         this.logger = plugin.getLogger();
-        this.spawnTagKey = new NamespacedKey(plugin, "skysignals_spawn");
-    }
-
-    public NamespacedKey getSpawnTagKey() {
-        return spawnTagKey;
+        this.waves = config.getMobInvasionWaves().toArray(new Config.MobWaveConfig[0]);
+        this.maxMobs = config.getMobInvasionMaxMobs();
     }
 
     @Override
     public void start() {
-        this.status = SkyEventStatus.ACTIVE;
-
-        world = Bukkit.getOnlinePlayers().stream()
-                .filter(p -> p.getWorld().getEnvironment() == World.Environment.NORMAL)
-                .map(Player::getWorld)
-                .findFirst()
-                .orElse(Bukkit.getWorld("world"));
-
-        if (world == null) {
-            this.status = SkyEventStatus.CANCELLED;
-            return;
-        }
-
-        Player target = Bukkit.getOnlinePlayers().stream()
-                .filter(p -> p.getWorld().equals(world))
-                .findFirst()
-                .orElse(null);
-        if (target == null) {
-            this.status = SkyEventStatus.CANCELLED;
-            return;
-        }
-        center = PositionUtils.findIslandCenter(target);
-        if (center == null) center = target.getLocation();
-
-        FileConfiguration config = plugin.getConfig();
-        maxWaves = config.getInt("mob-invasion.waves", 3);
-
-        notificationService.notifyEventStart(this);
-
-        FoliaScheduler.runRegion(plugin, center, this::spawnWave);
-    }
-
-    private void spawnWave() {
-        currentWave++;
-        if (currentWave > maxWaves) {
-            logger.info("Mob invasion completed after " + currentWave + " waves.");
-            return;
-        }
-
-        FileConfiguration config = plugin.getConfig();
-        String basePath = "mob-invasion.mobs";
-        ConfigurationSection section = config.getConfigurationSection(basePath);
-        if (section == null) {
-            logger.warning("No mob configuration found for mob invasion.");
-            return;
-        }
-
-        Random random = new Random();
-        for (String key : section.getKeys(false)) {
-            EntityType type;
-            try {
-                type = EntityType.valueOf(key.toUpperCase());
-            } catch (IllegalArgumentException e) {
-                continue;
-            }
-            int count = config.getInt(basePath + "." + key, 1);
-            for (int i = 0; i < count; i++) {
-                spawnMob(type, random);
-            }
-        }
-
-        FoliaScheduler.runRegionDelayed(plugin, center, () -> {
-            if (waveScheduled && currentWave < maxWaves) {
-                spawnWave();
-            }
-        }, 300L);
-        waveScheduled = true;
-    }
-
-    private void spawnMob(EntityType type, Random random) {
-        double angle = random.nextDouble() * Math.PI * 2;
-        double distance = 8 + random.nextDouble() * 12;
-        double x = center.getX() + Math.cos(angle) * distance;
-        double z = center.getZ() + Math.sin(angle) * distance;
-        Location spawnLoc = new Location(world, x, center.getY(), z);
-
-        Entity entity = world.spawnEntity(spawnLoc, type);
-        if (entity instanceof LivingEntity living) {
-            living.getPersistentDataContainer().set(spawnTagKey, PersistentDataType.BYTE, (byte) 1);
-            spawnedMobs.add(entity);
-        }
+        super.start();
     }
 
     @Override
-    public void tick() {
-        spawnedMobs.removeIf(entity -> !entity.isValid());
+    protected void onAnnouncing() {
+        this.status = SkyEventStatus.ANNOUNCING;
+        findSpawnLocation();
+    }
+
+    @Override
+    protected void onWarning() {
+        this.status = SkyEventStatus.WARNING;
+        startFirstWave();
+    }
+
+    @Override
+    protected void onActive() {
+        this.status = SkyEventStatus.ACTIVE;
+    }
+
+    @Override
+    protected void onCompleting() {
+        this.status = SkyEventStatus.COMPLETING;
+        cleanupMobs();
+    }
+
+    @Override
+    protected void onFinished() {
+        this.status = SkyEventStatus.FINISHED;
+    }
+
+    @Override
+    protected void onCancelled() {
+        this.status = SkyEventStatus.CANCELLED;
+        cleanupMobs();
+    }
+
+    private void findSpawnLocation() {
+        Player firstPlayer = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
+        Location playerLoc = firstPlayer != null ? firstPlayer.getLocation() : null;
+
+        locationService.findSafeLocation(playerLoc, 30, 100).ifPresentOrElse(loc -> {
+            spawnCenter = loc;
+            notificationService.notifyEventPhase(this, "start");
+            soundService.playGlobal("mob_invasion_start");
+        }, () -> {
+            logger.warning("Could not find safe location for mob invasion. Cancelling.");
+            this.status = SkyEventStatus.CANCELLED;
+        });
+    }
+
+    private void startFirstWave() {
+        currentWave.set(0);
+        spawnWave(0);
+    }
+
+    private void spawnWave(int waveIndex) {
+        if (waveIndex >= waves.length) {
+            checkTask = FoliaScheduler.runGlobalTimer(plugin, this::checkMobsRemaining, 20L, 20L);
+            return;
+        }
+
+        Config.MobWaveConfig wave = waves[waveIndex];
+        currentWave.set(waveIndex + 1);
+        int totalThisWave = wave.mobs().values().stream().mapToInt(Integer::intValue).sum();
+        mobsRemaining.addAndGet(totalThisWave);
+
+        notificationService.notifyEventPhase(this, "wave");
+        soundService.playGlobal("mob_invasion_wave");
+
+        int delay = wave.delay() * 20;
+        FoliaScheduler.runGlobalDelayed(plugin, () -> {
+            for (Map.Entry<String, Integer> entry : wave.mobs().entrySet()) {
+                String mobType = entry.getKey();
+                int count = entry.getValue();
+                for (int i = 0; i < count; i++) {
+                    spawnMob(mobType);
+                }
+            }
+
+            if (waveIndex + 1 < waves.length) {
+                int nextDelay = waves[waveIndex + 1].delay() * 20;
+                FoliaScheduler.runGlobalDelayed(plugin, () -> spawnWave(waveIndex + 1), nextDelay);
+            }
+        }, delay);
+    }
+
+    private void spawnMob(String mobType) {
+        if (spawnCenter == null || spawnCenter.getWorld() == null) return;
+        if (spawnedMobs.size() >= maxMobs) return;
+
+        World world = spawnCenter.getWorld();
+        EntityType type = EntityType.fromName(mobType);
+        if (type == null || !type.isAlive()) {
+            logger.warning("Invalid mob type: " + mobType);
+            return;
+        }
+
+        double angle = Math.random() * 2 * Math.PI;
+        double distance = 5 + Math.random() * 10;
+        Location spawnLoc = spawnCenter.clone().add(
+            distance * Math.cos(angle), 0, distance * Math.sin(angle)
+        );
+        spawnLoc.setY(world.getHighestBlockYAt(spawnLoc) + 1);
+
+        LivingEntity mob = (LivingEntity) world.spawnEntity(spawnLoc, type);
+
+        PersistentDataContainer pdc = mob.getPersistentDataContainer();
+        pdc.set(new NamespacedKey(plugin, "skysignals_event"), PersistentDataType.STRING, id.toString());
+        pdc.set(new NamespacedKey(plugin, "skysignals_mob"), PersistentDataType.BYTE, (byte) 1);
+
+        if (mob.getAttribute(Attribute.MAX_HEALTH) != null) {
+            mob.getAttribute(Attribute.MAX_HEALTH).setBaseValue(mob.getAttribute(Attribute.MAX_HEALTH).getBaseValue() * 1.2);
+            mob.setHealth(mob.getAttribute(Attribute.MAX_HEALTH).getBaseValue());
+        }
+        mob.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, Integer.MAX_VALUE, 0, false, false));
+
+        spawnedMobs.add(mob);
+
+        List<Player> audience = getNearbyPlayers(spawnLoc, 48);
+        if (!audience.isEmpty()) {
+            particleService.spawnCircle(spawnLoc, Particle.SOUL_FIRE_FLAME, 2, 10, 0.1, audience);
+        }
+    }
+
+    private void checkMobsRemaining() {
+        spawnedMobs.removeIf(mob -> !mob.isValid() || mob.isDead());
+
+        int alive = spawnedMobs.size();
+        mobsRemaining.set(alive);
+
+        notificationService.notifyEventPhase(this, "remaining");
+
+        if (alive == 0) {
+            if (checkTask != null) checkTask.cancel();
+            FoliaScheduler.runGlobalDelayed(plugin, () -> {
+                SkyEventManager em = (SkyEventManager) plugin.getServer().getPluginManager().getPlugin("SkySignals");
+                if (em != null) em.transitionPhase(this, SkyEventPhase.COMPLETING);
+            }, 20L);
+        }
+    }
+
+    public void onMobKill(Player killer, LivingEntity mob) {
+        PersistentDataContainer pdc = mob.getPersistentDataContainer();
+        String eventId = pdc.get(new NamespacedKey(plugin, "skysignals_event"), PersistentDataType.STRING);
+        if (eventId != null && eventId.equals(this.id.toString())) {
+            if (rewardedPlayers.add(killer.getUniqueId())) {
+                rewardService.giveRewards(id, SkyEventType.MOB_INVASION, killer.getUniqueId(), serverId);
+            }
+        }
+    }
+
+    private void cleanupMobs() {
+        for (LivingEntity mob : spawnedMobs) {
+            if (mob != null && mob.isValid() && !mob.isDead()) {
+                mob.remove();
+            }
+        }
+        spawnedMobs.clear();
+        if (waveTask != null) waveTask.cancel();
+        if (checkTask != null) checkTask.cancel();
+    }
+
+    private List<Player> getNearbyPlayers(Location center, double radius) {
+        if (center == null || center.getWorld() == null) return List.of();
+        double radiusSq = radius * radius;
+        List<Player> result = new ArrayList<>();
+        for (Player player : center.getWorld().getPlayers()) {
+            if (player.getLocation().distanceSquared(center) <= radiusSq) {
+                result.add(player);
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public void tick(long elapsedSeconds) {
+        super.tick(elapsedSeconds);
     }
 
     @Override
     public void stop() {
-        waveScheduled = false;
-        for (Entity entity : spawnedMobs) {
-            if (entity instanceof LivingEntity) {
-                entity.remove();
-            }
-        }
-        spawnedMobs.clear();
+        cleanupMobs();
     }
 
     @Override
@@ -154,7 +256,16 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
         stop();
     }
 
-    public Set<Entity> getSpawnedMobs() {
-        return spawnedMobs;
+    @Override
+    protected Map<String, Object> getExtraData() {
+        return Map.of(
+            "spawnX", spawnCenter != null ? spawnCenter.getBlockX() : 0,
+            "spawnY", spawnCenter != null ? spawnCenter.getBlockY() : 0,
+            "spawnZ", spawnCenter != null ? spawnCenter.getBlockZ() : 0,
+            "currentWave", currentWave.get(),
+            "totalWaves", waves.length,
+            "mobsRemaining", mobsRemaining.get(),
+            "mobsSpawned", spawnedMobs.size()
+        );
     }
 }

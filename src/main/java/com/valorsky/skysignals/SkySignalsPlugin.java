@@ -6,32 +6,47 @@ import com.valorsky.skysignals.cache.LocalEventCache;
 import com.valorsky.skysignals.command.SkySignalsCommand;
 import com.valorsky.skysignals.config.Config;
 import com.valorsky.skysignals.config.ConfigManager;
+import com.valorsky.skysignals.config.MessageConfig;
 import com.valorsky.skysignals.database.DatabaseManager;
 import com.valorsky.skysignals.database.EventRepository;
+import com.valorsky.skysignals.event.EventContext;
 import com.valorsky.skysignals.event.SkyEventFactory;
 import com.valorsky.skysignals.event.SkyEventManager;
 import com.valorsky.skysignals.event.impl.*;
+import com.valorsky.skysignals.island.DefaultIslandProvider;
+import com.valorsky.skysignals.island.IslandProvider;
 import com.valorsky.skysignals.listener.EventListener;
 import com.valorsky.skysignals.model.SkyEventType;
+import com.valorsky.skysignals.notification.ActionBarService;
+import com.valorsky.skysignals.notification.BossBarService;
 import com.valorsky.skysignals.notification.NotificationService;
+import com.valorsky.skysignals.notification.TitleService;
+import com.valorsky.skysignals.particle.ParticleService;
+import com.valorsky.skysignals.protection.DefaultProtectionProvider;
+import com.valorsky.skysignals.protection.ProtectionProvider;
 import com.valorsky.skysignals.rabbitmq.EventConsumer;
 import com.valorsky.skysignals.rabbitmq.EventPublisher;
 import com.valorsky.skysignals.rabbitmq.RabbitManager;
+import com.valorsky.skysignals.redis.DistributedLockService;
 import com.valorsky.skysignals.redis.RedisService;
 import com.valorsky.skysignals.reward.RewardService;
 import com.valorsky.skysignals.scheduler.SignalScheduler;
+import com.valorsky.skysignals.sound.SoundService;
+import com.valorsky.skysignals.location.SafeLocationService;
 import com.valorsky.skysignals.util.FoliaScheduler;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class SkySignalsPlugin extends JavaPlugin {
 
     private ConfigManager configManager;
+    private MessageConfig messageConfig;
     private SkyEventFactory factory;
     private SkyEventManager eventManager;
     private CacheService cacheService;
     private LocalEventCache localCache;
     private DatabaseManager databaseManager;
     private RedisService redisService;
+    private DistributedLockService lockService;
     private RabbitManager rabbitManager;
     private EventPublisher eventPublisher;
     private EventConsumer eventConsumer;
@@ -40,22 +55,42 @@ public final class SkySignalsPlugin extends JavaPlugin {
     private SignalScheduler scheduler;
     private SkySignalsAPI api;
 
+    // Services
+    private ParticleService particleService;
+    private SoundService soundService;
+    private TitleService titleService;
+    private ActionBarService actionBarService;
+    private BossBarService bossBarService;
+    private SafeLocationService locationService;
+    private ProtectionProvider protectionProvider;
+    private IslandProvider islandProvider;
+
     @Override
     public void onEnable() {
         saveDefaultConfig();
 
         configManager = new ConfigManager(this);
         configManager.initialize();
+        messageConfig = configManager.messages();
         Config config = configManager.config();
 
+        // Core services
         cacheService = new CacheService(config);
         localCache = new LocalEventCache(config.cacheMaximumSize(), config.cacheExpireAfterMinutes());
-        notificationService = new NotificationService(this, config, configManager.messages());
-        rewardService = new RewardService(this, config);
 
-        factory = new SkyEventFactory();
-        registerEvents();
+        // Notification services
+        titleService = new TitleService(this, config);
+        actionBarService = new ActionBarService(this, config);
+        bossBarService = new BossBarService(this, config);
+        soundService = new SoundService(this, config);
+        particleService = new ParticleService(this, config);
 
+        // Location & protection
+        protectionProvider = new DefaultProtectionProvider();
+        islandProvider = new DefaultIslandProvider(this);
+        locationService = new SafeLocationService(this, config, protectionProvider, islandProvider);
+
+        // Database
         databaseManager = new DatabaseManager(config, getLogger());
         databaseManager.connect();
 
@@ -64,13 +99,30 @@ public final class SkySignalsPlugin extends JavaPlugin {
                 getLogger()
         );
 
+        // Redis
         redisService = new RedisService(config, getLogger());
         redisService.connect();
 
+        lockService = new DistributedLockService(redisService.getClient(), getLogger());
+
+        // RabbitMQ
         rabbitManager = new RabbitManager(config, getLogger());
         rabbitManager.connect();
 
         eventPublisher = new EventPublisher(rabbitManager, getLogger());
+
+        // Reward service
+        rewardService = new RewardService(this, config, databaseManager);
+
+        // Notification service
+        notificationService = new NotificationService(
+                this, config, messageConfig,
+                titleService, actionBarService, bossBarService, soundService
+        );
+
+        // Event factory & manager
+        factory = new SkyEventFactory();
+        registerEvents();
 
         eventManager = new SkyEventManager(
                 this, factory, cacheService, localCache,
@@ -78,21 +130,32 @@ public final class SkySignalsPlugin extends JavaPlugin {
                 notificationService, config
         );
 
+        // Event context for DI (scheduler set later)
+        EventContext eventContext = new EventContext(
+                this, config,
+                new com.valorsky.skysignals.animation.AnimationService(this),
+                particleService, soundService,
+                titleService, actionBarService, bossBarService,
+                locationService, protectionProvider, islandProvider,
+                rewardService, null
+        );
+
+        scheduler = new SignalScheduler(this, config, eventManager, lockService, eventContext);
+        eventContext.setScheduler(scheduler);
+        eventManager.setEventContext(eventContext);
+
         eventConsumer = new EventConsumer(rabbitManager, config, getLogger(), eventManager, this);
 
         eventManager.initialize();
 
         if (redisService.isConnected()) {
-            redisService.addListener(new RedisService.RedisEventListener() {
-                @Override
-                public void onEventPublished(com.valorsky.skysignals.model.EventState state) {
-                    FoliaScheduler.runGlobal(SkySignalsPlugin.this, () -> {
-                        switch (state.status()) {
-                            case ACTIVE -> eventManager.handleEventStarted(state);
-                            case FINISHED, CANCELLED -> eventManager.handleEventFinished(state);
-                        }
-                    });
-                }
+            redisService.addListener(state -> {
+                FoliaScheduler.runGlobal(this, () -> {
+                    switch (state.status()) {
+                        case ACTIVE -> eventManager.handleEventStarted(state);
+                        case FINISHED, CANCELLED -> eventManager.handleEventFinished(state);
+                    }
+                });
             });
         }
 
@@ -106,15 +169,15 @@ public final class SkySignalsPlugin extends JavaPlugin {
         );
 
         SkySignalsCommand cmd = new SkySignalsCommand(
-                this, api, config, configManager.messages(), cacheService,
-                redisService, rabbitManager, notificationService
+                this, api, config, messageConfig, cacheService,
+                redisService, rabbitManager, notificationService,
+                eventContext
         );
         getCommand("skysignals").setExecutor(cmd);
         getCommand("skysignals").setTabCompleter(cmd);
 
         getServer().getPluginManager().registerEvents(new EventListener(this, eventManager), this);
 
-        scheduler = new SignalScheduler(this, config, eventManager);
         scheduler.start();
 
         getLogger().info("Plugin enabled.");
@@ -125,17 +188,23 @@ public final class SkySignalsPlugin extends JavaPlugin {
         Config config = configManager.config();
 
         factory.register(SkyEventType.METEOR,
-                state -> new MeteorEvent(state, this, notificationService, rewardService));
+                (state, ctx) -> new MeteorEvent(state, this, notificationService, rewardService,
+                        particleService, soundService, locationService, config));
         factory.register(SkyEventType.STORM,
-                state -> new StormEvent(state, this, notificationService, rewardService));
+                (state, ctx) -> new StormEvent(state, this, notificationService, rewardService,
+                        particleService, soundService));
         factory.register(SkyEventType.SKY_CHEST,
-                state -> new SkyChestEvent(state, this, notificationService, rewardService));
+                (state, ctx) -> new SkyChestEvent(state, this, notificationService, rewardService,
+                        particleService, soundService, locationService, config));
         factory.register(SkyEventType.MOB_INVASION,
-                state -> new MobInvasionEvent(state, this, notificationService));
+                (state, ctx) -> new MobInvasionEvent(state, this, notificationService, rewardService,
+                        particleService, soundService, locationService, config));
         factory.register(SkyEventType.MINERAL_RAIN,
-                state -> new MineralRainEvent(state, this, notificationService));
+                (state, ctx) -> new MineralRainEvent(state, this, notificationService, rewardService,
+                        particleService, soundService, locationService, config));
         factory.register(SkyEventType.GROWTH_BOOST,
-                state -> new GrowthBoostEvent(state, this, notificationService));
+                (state, ctx) -> new GrowthBoostEvent(state, this, notificationService,
+                        particleService, soundService, config));
     }
 
     @Override
@@ -143,6 +212,7 @@ public final class SkySignalsPlugin extends JavaPlugin {
         if (scheduler != null) scheduler.stop();
         if (eventManager != null) eventManager.shutdown();
         if (notificationService != null) notificationService.cleanup();
+        if (lockService != null) lockService.shutdown();
         if (redisService != null) redisService.disconnect();
         if (rabbitManager != null) rabbitManager.disconnect();
         if (databaseManager != null) databaseManager.disconnect();
@@ -152,6 +222,7 @@ public final class SkySignalsPlugin extends JavaPlugin {
 
     public void onReload() {
         if (configManager != null) configManager.reload();
+        if (messageConfig != null) messageConfig.reload();
         if (scheduler != null) scheduler.reload();
         if (eventManager != null) eventManager.reload();
         getLogger().info("Plugin reloaded.");
@@ -160,4 +231,13 @@ public final class SkySignalsPlugin extends JavaPlugin {
     public SkySignalsAPI getApi() {
         return api;
     }
+
+    // Service getters for events
+    public ParticleService getParticleService() { return particleService; }
+    public SoundService getSoundService() { return soundService; }
+    public SafeLocationService getLocationService() { return locationService; }
+    public NotificationService getNotificationService() { return notificationService; }
+    public RewardService getRewardService() { return rewardService; }
+    public Config getPluginConfig() { return configManager.config(); }
+    public MessageConfig getMessageConfig() { return messageConfig; }
 }

@@ -1,5 +1,5 @@
 name: ValorSky-SkySignals
-version: 1.0.1
+version: 2.0.0
 main: com.valorsky.skysignals.SkySignalsPlugin
 api-version: '1.21'
 folia-supported: true
@@ -32,4 +32,7 @@ permissions:
     default: true
   valorsky.skysignals.debug:
     description: Debug SkySignals
+    default: op
+  valorsky.skysignals.test:
+    description: Test SkySignals events
     default: op

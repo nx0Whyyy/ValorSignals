@@ -2,146 +2,146 @@ package com.valorsky.skysignals.notification;
 
 import com.valorsky.skysignals.config.Config;
 import com.valorsky.skysignals.config.MessageConfig;
+import com.valorsky.skysignals.model.NotificationLevel;
 import com.valorsky.skysignals.model.SkyEvent;
+import com.valorsky.skysignals.model.SkyEventType;
+import com.valorsky.skysignals.sound.SoundService;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
-import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
-import org.bukkit.Bukkit;
-import org.bukkit.Particle;
-import org.bukkit.Sound;
-import org.bukkit.boss.BarColor;
-import org.bukkit.boss.BarStyle;
-import org.bukkit.boss.BossBar;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import com.valorsky.skysignals.util.FoliaScheduler;
-import com.valorsky.skysignals.util.FoliaScheduler.TaskHandle;
-
-import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.logging.Logger;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class NotificationService {
 
     private final JavaPlugin plugin;
     private final Config config;
     private final MessageConfig messages;
-    private final Logger logger;
     private final MiniMessage miniMessage;
-    private final Map<UUID, BossBar> bossBars = new HashMap<>();
-    private final Map<UUID, TaskHandle> bossBarTasks = new HashMap<>();
+    private final TitleService titleService;
+    private final ActionBarService actionBarService;
+    private final BossBarService bossBarService;
+    private final SoundService soundService;
+    private final Map<UUID, String> activeBossBarIds = new ConcurrentHashMap<>();
 
-    public NotificationService(JavaPlugin plugin, Config config, MessageConfig messages) {
+    public NotificationService(
+            JavaPlugin plugin,
+            Config config,
+            MessageConfig messages,
+            TitleService titleService,
+            ActionBarService actionBarService,
+            BossBarService bossBarService,
+            SoundService soundService
+    ) {
         this.plugin = plugin;
         this.config = config;
         this.messages = messages;
-        this.logger = plugin.getLogger();
         this.miniMessage = MiniMessage.miniMessage();
+        this.titleService = titleService;
+        this.actionBarService = actionBarService;
+        this.bossBarService = bossBarService;
+        this.soundService = soundService;
     }
 
     public void notifyEventStart(SkyEvent event) {
-        String path = event.getType().name().toLowerCase().replace("_", "-");
-        String template = messages.get(path + ".start");
-        if (template.isEmpty()) {
-            template = "<yellow>" + event.getType().symbol() + " " + event.getType().displayName();
-        }
-        Component component = miniMessage.deserialize(template,
-                Placeholder.parsed("direction", "Nord-Est"),
-                Placeholder.parsed("event", event.getType().displayName()),
-                Placeholder.parsed("server", event.getServerId())
-        );
-
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            FoliaScheduler.runEntity(plugin, player, () -> {
-                if (config.notificationsChat()) {
-                    player.sendMessage(component);
-                }
-                if (config.notificationsActionbar()) {
-                    player.sendActionBar(Component.text(event.getType().symbol() + " " + event.getType().displayName()));
-                }
-                if (config.notificationsSound()) {
-                    player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 1.0f, 1.0f);
-                }
-                if (config.notificationsParticles()) {
-                    player.getWorld().spawnParticle(Particle.HAPPY_VILLAGER, player.getLocation(), 10);
-                }
-            });
-        }
-
+        notifyEvent(event, "start", NotificationLevel.GLOBAL);
         createBossBar(event);
     }
 
+    public void notifyEventPhase(SkyEvent event, String messageKey) {
+        notifyEvent(event, messageKey, NotificationLevel.GLOBAL);
+    }
+
     public void notifyEventEnd(SkyEvent event) {
-        String path = event.getType().name().toLowerCase().replace("_", "-");
-        String template = messages.get(path + ".end");
-        if (template.isEmpty()) {
-            template = "<green>L'événement est terminé.";
-        }
-        Component component = miniMessage.deserialize(template,
-                Placeholder.parsed("event", event.getType().displayName()),
-                Placeholder.parsed("server", event.getServerId())
-        );
-
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            FoliaScheduler.runEntity(plugin, player, () -> {
-                if (config.notificationsChat()) {
-                    player.sendMessage(component);
-                }
-            });
-        }
-
+        notifyEvent(event, "finish", NotificationLevel.GLOBAL);
         removeBossBar(event.getId());
     }
 
-    private void createBossBar(SkyEvent event) {
-        if (!config.notificationsBossbar()) return;
+    public void notifyEvent(SkyEvent event, String messageKey, NotificationLevel level) {
+        SkyEventType type = event.getType();
+        String path = type.configKey() + "." + messageKey;
+        String template = messages.get(path);
+        if (template.isEmpty()) {
+            template = messages.get(type.configKey() + ".start");
+        }
+        if (template.isEmpty()) {
+            template = "<yellow>" + type.symbol() + " " + type.displayName();
+        }
 
-        String path = event.getType().name().toLowerCase().replace("_", "-");
-        String template = messages.get(path + ".bossbar", event.getType().symbol() + " " + event.getType().displayName() + " - %time%");
+        Component component = miniMessage.deserialize(template,
+            Placeholder.parsed("direction", "Nord"),
+            Placeholder.parsed("event", type.displayName()),
+            Placeholder.parsed("server", event.getServerId()),
+            Placeholder.parsed("time", formatTime(event.getSecondsRemaining())),
+            Placeholder.parsed("wave", "1"),
+            Placeholder.parsed("max", "1"),
+            Placeholder.parsed("count", "0")
+        );
+
+        List<Player> audience = getAudience(event, level);
+
+        if (config.notificationsChat()) {
+            for (Player player : audience) {
+                player.sendMessage(component);
+            }
+        }
+
+        if (config.actionBarEnabled()) {
+            Component actionBarMsg = miniMessage.deserialize(
+                type.symbol() + " " + type.displayName() + " <gray>" + formatTime(event.getSecondsRemaining())
+            );
+            actionBarService.send(actionBarMsg, audience);
+        }
+
+        if (config.soundsEnabled()) {
+            soundService.playGlobal("global_announce");
+        }
+    }
+
+    private List<Player> getAudience(SkyEvent event, NotificationLevel level) {
+        List<Player> result = new ArrayList<>();
+        for (Player player : plugin.getServer().getOnlinePlayers()) {
+            result.add(player);
+        }
+        return result;
+    }
+
+    private void createBossBar(SkyEvent event) {
+        if (!config.bossBarEnabled()) return;
+
+        String path = event.getType().configKey() + ".bossbar";
+        String template = messages.get(path, event.getType().symbol() + " " + event.getType().displayName() + " - %time%");
         String formatted = template.replace("%time%", formatTime(event.getSecondsRemaining()));
         Component title = miniMessage.deserialize(formatted);
 
-        BossBar bar = Bukkit.createBossBar(PlainTextComponentSerializer.plainText().serialize(title), BarColor.YELLOW, BarStyle.SOLID);
-        bar.setProgress(1.0);
+        String bossBarId = UUID.randomUUID().toString();
+        activeBossBarIds.put(event.getId(), bossBarId);
 
-        bossBars.put(event.getId(), bar);
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            FoliaScheduler.runEntity(plugin, player, () -> bar.addPlayer(player));
+        List<Player> audience = new ArrayList<>();
+        for (Player player : plugin.getServer().getOnlinePlayers()) {
+            audience.add(player);
         }
+        bossBarService.create(bossBarId, title, 1.0f, audience);
 
-        TaskHandle task = FoliaScheduler.runGlobalTimer(plugin, () -> {
-            BossBar existing = bossBars.get(event.getId());
-            if (existing != null) {
-                updateBossBar(event, existing);
+        plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
+            String barId = activeBossBarIds.get(event.getId());
+            if (barId != null) {
+                String formattedNow = template.replace("%time%", formatTime(event.getSecondsRemaining()));
+                bossBarService.update(barId, miniMessage.deserialize(formattedNow), (float) event.getProgress());
             }
         }, 20L, 20L);
-        bossBarTasks.put(event.getId(), task);
-    }
-
-    private void updateBossBar(SkyEvent event, BossBar bar) {
-        String path = event.getType().name().toLowerCase().replace("_", "-");
-        String template = messages.get(path + ".bossbar", event.getType().symbol() + " " + event.getType().displayName() + " - %time%");
-        String formatted = template.replace("%time%", formatTime(event.getSecondsRemaining()));
-        bar.setTitle(PlainTextComponentSerializer.plainText().serialize(miniMessage.deserialize(formatted)));
-        long total = event.getEndsAt().getEpochSecond() - event.getStartedAt().getEpochSecond();
-        long remaining = event.getEndsAt().getEpochSecond() - java.time.Instant.now().getEpochSecond();
-        bar.setProgress(total > 0 ? (double) Math.max(0, remaining) / total : 0.0);
     }
 
     private void removeBossBar(UUID eventId) {
-        TaskHandle task = bossBarTasks.remove(eventId);
-        if (task != null) {
-            task.cancel();
-        }
-        BossBar bar = bossBars.remove(eventId);
-        if (bar != null) {
-            bar.setVisible(false);
-            for (Player player : Bukkit.getOnlinePlayers()) {
-                FoliaScheduler.runEntity(plugin, player, () -> bar.removePlayer(player));
-            }
+        String bossBarId = activeBossBarIds.remove(eventId);
+        if (bossBarId != null) {
+            bossBarService.remove(bossBarId);
         }
     }
 
@@ -152,13 +152,9 @@ public final class NotificationService {
     }
 
     public void cleanup() {
-        for (TaskHandle task : bossBarTasks.values()) {
-            task.cancel();
+        for (String bossBarId : activeBossBarIds.values()) {
+            bossBarService.remove(bossBarId);
         }
-        bossBarTasks.clear();
-        for (BossBar bar : bossBars.values()) {
-            bar.setVisible(false);
-        }
-        bossBars.clear();
+        activeBossBarIds.clear();
     }
 }

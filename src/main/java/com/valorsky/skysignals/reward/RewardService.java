@@ -1,119 +1,183 @@
 package com.valorsky.skysignals.reward;
 
 import com.valorsky.skysignals.config.Config;
+import com.valorsky.skysignals.database.DatabaseManager;
 import com.valorsky.skysignals.model.SkyEventType;
-import com.valorsky.skysignals.util.FoliaScheduler;
+import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import com.valorsky.skysignals.util.FoliaScheduler;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
-import java.util.WeakHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 
 public final class RewardService {
 
     private final JavaPlugin plugin;
     private final Config config;
+    private final DatabaseManager databaseManager;
     private final Logger logger;
 
-    private final Set<UUID> rewardedPlayers = java.util.Collections.newSetFromMap(new WeakHashMap<>());
-
-    public RewardService(JavaPlugin plugin, Config config) {
+    public RewardService(JavaPlugin plugin, Config config, DatabaseManager databaseManager) {
         this.plugin = plugin;
         this.config = config;
+        this.databaseManager = databaseManager;
         this.logger = plugin.getLogger();
     }
 
-    public void giveRewards(Player player, SkyEventType eventType) {
-        UUID playerId = player.getUniqueId();
-        if (rewardedPlayers.contains(playerId)) {
-            logger.warning("Player " + player.getName() + " already rewarded for " + eventType + ", skipping.");
-            return;
-        }
-        rewardedPlayers.add(playerId);
+    public CompletableFuture<RewardResult> giveRewards(UUID eventId, SkyEventType eventType, UUID playerId, String serverId) {
+        return CompletableFuture.supplyAsync(() -> {
+            String claimKey = eventId + ":" + playerId + ":" + eventType.name();
 
-        Reward reward = buildReward(eventType);
+            if (hasClaimed(claimKey)) {
+                return new RewardResult(false, "already_claimed", List.of());
+            }
 
-        FoliaScheduler.runEntity(plugin, player, () -> {
-            giveMoney(player, reward);
-            runCommands(player, reward, eventType);
-            giveItems(player, reward);
-        });
+            try {
+                RewardContext context = new RewardContext(
+                    eventId, eventType, playerId, serverId,
+                    System.currentTimeMillis(), buildPlaceholders(eventId, eventType, playerId, serverId)
+                );
+
+                List<RewardType> rewards = buildRewards(eventType, context);
+                Player player = Bukkit.getPlayer(playerId);
+
+                if (player != null && player.isOnline()) {
+                    FoliaScheduler.runEntity(plugin, player, () -> {
+                        giveMoney(player, context);
+                        runCommands(player, context);
+                        giveItems(player, rewards);
+                    });
+                }
+
+                recordClaim(claimKey);
+                return new RewardResult(true, "success", rewards);
+
+            } catch (Exception e) {
+                logger.severe("Failed to give rewards: " + e.getMessage());
+                return new RewardResult(false, "error: " + e.getMessage(), List.of());
+            }
+        }, databaseManager.asyncExecutor());
     }
 
-    private Reward buildReward(SkyEventType eventType) {
-        List<String> commands = new ArrayList<>(config.getRewardCommands(eventType));
-        List<Reward.ItemReward> items = config.getConfig()
-                .getMapList("rewards." + eventType.name().toLowerCase().replace("_", "-") + ".items")
-                .stream()
-                .map(this::parseItemReward)
-                .toList();
+    private boolean hasClaimed(String claimKey) {
+        try (Connection conn = databaseManager.getDataSource().getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                 "SELECT 1 FROM sky_signals_rewards WHERE claim_key = ?"
+             )) {
+            stmt.setString(1, claimKey);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            logger.warning("Failed to check reward claim: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private void recordClaim(String claimKey) {
+        try (Connection conn = databaseManager.getDataSource().getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                 "INSERT IGNORE INTO sky_signals_rewards (claim_key, claimed_at) VALUES (?, NOW())"
+             )) {
+            stmt.setString(1, claimKey);
+            stmt.executeUpdate();
+        } catch (Exception e) {
+            logger.warning("Failed to record reward claim: " + e.getMessage());
+        }
+    }
+
+    private Map<String, String> buildPlaceholders(UUID eventId, SkyEventType eventType, UUID playerId, String serverId) {
+        Player player = Bukkit.getPlayer(playerId);
+        return Map.of(
+            "player", player != null ? player.getName() : playerId.toString(),
+            "uuid", playerId.toString(),
+            "event", eventType.name(),
+            "event_id", eventId.toString(),
+            "server", serverId
+        );
+    }
+
+    private List<RewardType> buildRewards(SkyEventType eventType, RewardContext context) {
+        List<RewardType> rewards = new ArrayList<>();
 
         int moneyMin = config.getRewardMoneyMin(eventType);
         int moneyMax = config.getRewardMoneyMax(eventType);
-
-        return new Reward(moneyMin, moneyMax, commands, items);
-    }
-
-    private Reward.ItemReward parseItemReward(Map<?, ?> map) {
-        String materialStr = (String) map.get("material");
-        Material material = Material.matchMaterial(materialStr);
-        if (material == null) material = Material.STONE;
-        Object amountObj = map.get("amount");
-        int amount = amountObj != null ? ((Number) amountObj).intValue() : 1;
-        Object nameObj = map.get("name");
-        String name = nameObj != null ? (String) nameObj : "";
-        Object loreObj = map.get("lore");
-        @SuppressWarnings("unchecked")
-        List<String> lore = loreObj != null ? (List<String>) loreObj : new ArrayList<>();
-        return new Reward.ItemReward(material, amount, name, lore);
-    }
-
-    private void giveMoney(Player player, Reward reward) {
-        if (reward.getMoneyMax() > 0) {
-            int amount = reward.getMoneyMin() + (int) (Math.random() * (reward.getMoneyMax() - reward.getMoneyMin() + 1));
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "eco give " + player.getName() + " " + amount);
+        if (moneyMax > 0) {
+            double amount = moneyMin + Math.random() * (moneyMax - moneyMin);
+            rewards.add(new MoneyReward(amount));
         }
-    }
 
-    private void runCommands(Player player, Reward reward, SkyEventType eventType) {
-        String eventId = "";
-        for (String cmd : reward.getCommands()) {
-            String processed = cmd.replace("%player%", player.getName())
-                    .replace("%uuid%", player.getUniqueId().toString())
-                    .replace("%event%", eventType.name())
-                    .replace("%server%", config.serverId())
-                    .replace("%eventid%", eventId);
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), processed);
+        for (String cmd : config.getRewardCommands(eventType)) {
+            String processed = cmd
+                .replace("%player%", context.placeholders().get("player"))
+                .replace("%uuid%", context.placeholders().get("uuid"))
+                .replace("%event%", context.placeholders().get("event"))
+                .replace("%event_id%", context.placeholders().get("event_id"))
+                .replace("%server%", context.placeholders().get("server"));
+            rewards.add(new CommandReward(processed));
         }
-    }
 
-    private void giveItems(Player player, Reward reward) {
-        for (Reward.ItemReward item : reward.getItems()) {
-            ItemStack stack = new ItemStack(item.getMaterial(), Math.max(1, item.getAmount()));
-            if (item.getName() != null && !item.getName().isEmpty()) {
-                org.bukkit.inventory.meta.ItemMeta meta = stack.getItemMeta();
-                if (meta != null) {
-                    meta.setDisplayName(item.getName());
-                    stack.setItemMeta(meta);
+        String path = "rewards." + eventType.configKey() + ".items";
+        List<?> itemsConfig = config.getConfig().getList(path);
+        if (itemsConfig != null) {
+            for (Object obj : itemsConfig) {
+                if (obj instanceof Map<?, ?> map) {
+                    String materialStr = (String) map.get("material");
+                    Material material = Material.matchMaterial(materialStr);
+                    if (material != null) {
+                        int amount = map.get("amount") instanceof Number n ? n.intValue() : 1;
+                        String name = map.get("name") instanceof String s ? s : "";
+                        rewards.add(new ItemReward(material, amount, name.isEmpty() ? null : Component.text(name), List.of()));
+                    }
                 }
             }
-            player.getInventory().addItem(stack);
+        }
+
+        return rewards;
+    }
+
+    private void giveMoney(Player player, RewardContext context) {
+        for (RewardType reward : buildRewards(context.eventType(), context)) {
+            if (reward instanceof MoneyReward mr) {
+                Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
+                    "eco give " + player.getName() + " " + (long) mr.amount());
+            }
         }
     }
 
-    public boolean isRewarded(UUID playerId) {
-        return rewardedPlayers.contains(playerId);
+    private void runCommands(Player player, RewardContext context) {
+        for (RewardType reward : buildRewards(context.eventType(), context)) {
+            if (reward instanceof CommandReward cr) {
+                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cr.command());
+            }
+        }
     }
 
-    public void reset() {
-        rewardedPlayers.clear();
+    private void giveItems(Player player, List<RewardType> rewards) {
+        for (RewardType reward : rewards) {
+            if (reward instanceof ItemReward ir) {
+                ItemStack stack = new ItemStack(ir.material(), Math.max(1, ir.amount()));
+                if (ir.name() != null) {
+                    var meta = stack.getItemMeta();
+                    if (meta != null) {
+                        meta.displayName(ir.name());
+                        stack.setItemMeta(meta);
+                    }
+                }
+                player.getInventory().addItem(stack);
+            }
+        }
     }
 }

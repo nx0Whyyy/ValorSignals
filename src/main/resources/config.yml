@@ -7,74 +7,100 @@ scheduler:
   enabled: true
   min-interval: 300
   max-interval: 900
-  allowed-events:
-    - METEOR
-    - STORM
-    - SKY_CHEST
-    - MOB_INVASION
-    - MINERAL_RAIN
-    - GROWTH_BOOST
+  allowed-events: []
+
+event-weights:
+  meteor: 30
+  storm: 10
+  sky_chest: 25
+  mob_invasion: 15
+  mineral_rain: 15
+  growth_boost: 5
 
 events:
   allow-concurrent: false
   max-active: 1
 
+conflicts:
+  meteor: []
+  storm: []
+  sky_chest: []
+  mob_invasion: []
+  mineral_rain: []
+  growth_boost: []
+
+cooldowns:
+  global-event: 300
+  player-participation: 60
+
+visuals:
+  enabled: true
+  view-distance: 48
+  particles:
+    enabled: true
+    max-per-second: 250
+  sounds:
+    enabled: true
+  titles:
+    enabled: true
+    fade-in: 10
+    stay: 40
+    fade-out: 20
+  actionbar:
+    enabled: true
+  bossbar:
+    enabled: true
+
+performance:
+  max-event-entities: 30
+  max-mineral-items: 25
+
+events-config:
   meteor:
     enabled: true
     duration: 180
+    warning-duration: 15
+    terrain-destruction: false
+    allowed-blocks: []
 
   storm:
     enabled: true
     duration: 120
 
-  sky-chest:
+  sky_chest:
     enabled: true
     duration: 300
-    loot:
-      - material: DIAMOND
-        weight: 10
-        amount-min: 1
-        amount-max: 2
-      - material: GOLD_INGOT
-        weight: 30
-        amount-min: 3
-        amount-max: 6
-      - material: IRON_INGOT
-        weight: 50
-        amount-min: 5
-        amount-max: 10
-      - material: EMERALD
-        weight: 15
-        amount-min: 1
-        amount-max: 3
 
-  mob-invasion:
+  mob_invasion:
     enabled: true
     duration: 300
-    waves: 3
-    mobs:
-      ZOMBIE: 5
-      SKELETON: 5
-      CREEPER: 2
+    max-mobs: 20
+    waves:
+      - delay: 0
+        mobs:
+          ZOMBIE: 5
+          SKELETON: 3
+      - delay: 30
+        mobs:
+          ZOMBIE: 8
+          SPIDER: 3
+      - delay: 30
+        mobs:
+          CREEPER: 2
+          SKELETON: 5
 
-  mineral-rain:
+  mineral_rain:
     enabled: true
     duration: 120
-    max-drops: 50
-    drops:
-      DIAMOND:
-        weight: 5
-      GOLD_INGOT:
-        weight: 15
-      IRON_INGOT:
-        weight: 25
-      COAL:
-        weight: 40
+    max-active-items: 25
+    spawn-interval: 10
 
-  growth-boost:
+  growth_boost:
     enabled: true
     duration: 300
     multiplier: 2.0
+    visual:
+      particle-cooldown: 20
 
 redis:
   enabled: true
@@ -102,47 +128,11 @@ cache:
   maximum-size: 100
   expire-after-minutes: 10
 
-notifications:
-  chat: true
-  actionbar: true
-  bossbar: true
-  sound: true
-  particles: true
+location:
+  min-height: 60
+  max-height: 250
 
-rewards:
-  meteor:
-    money:
-      min: 100
-      max: 500
-    commands:
-      - "give %player% diamond 1"
-    items:
-      - material: GOLD_INGOT
-        amount: 3
-
-  storm:
-    money:
-      min: 50
-      max: 200
-
-  sky-chest:
-    money:
-      min: 200
-      max: 800
-    commands:
-      - "give %player% diamond 1"
-
-  mob-invasion:
-    money:
-      min: 150
-      max: 600
-
-  mineral-rain:
-    money:
-      min: 80
-      max: 300
-
-  growth-boost:
-    money:
-      min: 50
-      max: 150
+testing:
+  rewards: false
+  announcements: true
+  visuals: true

@@ -1,5 +1,7 @@
 package com.valorsky.skysignals.redis;
 
+import com.valorsky.skysignals.model.EventScope;
+import com.valorsky.skysignals.model.SkyEventPhase;
 import com.valorsky.skysignals.model.SkyEventStatus;
 import com.valorsky.skysignals.model.SkyEventType;
 
@@ -11,9 +13,13 @@ public record RedisEventState(
     UUID id,
     SkyEventType type,
     String serverId,
+    EventScope scope,
+    Instant scheduledAt,
     Instant startedAt,
     Instant endsAt,
     SkyEventStatus status,
+    SkyEventPhase phase,
+    long elapsedSeconds,
     Map<String, Object> data
 ) {
     public String redisKey() {
@@ -24,9 +30,12 @@ public record RedisEventState(
         StringBuilder sb = new StringBuilder();
         sb.append("type=").append(type.name()).append("\n");
         sb.append("server=").append(serverId).append("\n");
+        sb.append("scope=").append(scope.name()).append("\n");
         sb.append("status=").append(status.name()).append("\n");
+        sb.append("phase=").append(phase.name()).append("\n");
         sb.append("start=").append(startedAt.getEpochSecond()).append("\n");
         sb.append("end=").append(endsAt.getEpochSecond()).append("\n");
+        sb.append("elapsed=").append(elapsedSeconds).append("\n");
         return sb.toString();
     }
 }

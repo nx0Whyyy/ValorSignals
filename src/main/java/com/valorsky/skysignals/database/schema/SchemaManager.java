@@ -3,9 +3,7 @@ package com.valorsky.skysignals.database.schema;
 import com.valorsky.skysignals.database.migration.Migration;
 
 import javax.sql.DataSource;
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -49,15 +47,10 @@ public final class SchemaManager {
 
     private static List<Migration> loadMigrations() {
         List<Migration> migrations = new ArrayList<>();
-        try {
-            Path migrationDir = Path.of("database/migration");
-            if (Files.notExists(migrationDir)) {
-                migrationDir = Path.of("src/main/resources/database/migration");
-            }
-            if (Files.notExists(migrationDir)) {
-                migrationDir = Path.of("src/main/resources/migration");
-            }
 
+        // Load from resources
+        try {
+            Path migrationDir = Path.of("src/main/resources/database/migration");
             if (Files.exists(migrationDir)) {
                 try (var stream = Files.list(migrationDir)) {
                     stream.filter(p -> p.toString().endsWith(".sql"))
@@ -71,12 +64,13 @@ public final class SchemaManager {
                             });
                 }
             }
-
-            if (migrations.isEmpty()) {
-                migrations.addAll(loadBuiltinMigrations());
-            }
         } catch (Exception e) {
-            return loadBuiltinMigrations();
+            // Fall back to builtin
+        }
+
+        // Builtin migrations as fallback
+        if (migrations.isEmpty()) {
+            migrations.addAll(loadBuiltinMigrations());
         }
         return migrations;
     }
@@ -90,10 +84,16 @@ public final class SchemaManager {
                     event_id VARCHAR(36) NOT NULL UNIQUE,
                     type VARCHAR(32) NOT NULL,
                     server VARCHAR(64) NOT NULL,
+                    scope VARCHAR(20) NOT NULL DEFAULT 'SERVER',
+                    scheduled_at TIMESTAMP NOT NULL,
                     started_at TIMESTAMP NOT NULL,
                     ended_at TIMESTAMP NULL,
                     status VARCHAR(20) NOT NULL,
-                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    phase VARCHAR(20) NOT NULL DEFAULT 'SCHEDULED',
+                    elapsed_seconds BIGINT DEFAULT 0,
+                    data JSON,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 )
                 """);
 
@@ -105,16 +105,32 @@ public final class SchemaManager {
                     contribution INT DEFAULT 0,
                     rewarded BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (event_id) REFERENCES sky_signals_events(event_id) ON DELETE CASCADE,
+                    UNIQUE KEY unique_event_player (event_id, uuid)
+                )
+                """);
+
+        Migration v3 = new Migration(3, "create_rewards_table", """
+                CREATE TABLE IF NOT EXISTS sky_signals_rewards (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    claim_key VARCHAR(255) NOT NULL UNIQUE,
+                    event_id VARCHAR(36) NOT NULL,
+                    player_uuid VARCHAR(36) NOT NULL,
+                    event_type VARCHAR(32) NOT NULL,
+                    reward_type VARCHAR(32) NOT NULL,
+                    reward_data JSON,
+                    claimed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (event_id) REFERENCES sky_signals_events(event_id) ON DELETE CASCADE
                 )
                 """);
 
         migrations.add(v1);
         migrations.add(v2);
+        migrations.add(v3);
         return migrations;
     }
 
-    private static Migration loadFromFile(Path path) throws Exception {
+    private static Migration loadFromFile(Path path) throws IOException {
         String fileName = path.getFileName().toString();
         String[] parts = fileName.split("__");
         int version = Integer.parseInt(parts[0].substring(1).replace("V", ""));

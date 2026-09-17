@@ -1,5 +1,6 @@
 package com.valorsky.skysignals.event;
 
+import com.valorsky.skysignals.event.EventContext;
 import com.valorsky.skysignals.model.EventState;
 import com.valorsky.skysignals.model.SkyEvent;
 import com.valorsky.skysignals.model.SkyEventStatus;
@@ -22,17 +23,17 @@ class SkyEventFactoryTest {
     void setUp() {
         factory = new SkyEventFactory();
 
-        factory.register(SkyEventType.METEOR, state -> new TestSkyEvent(state));
-        factory.register(SkyEventType.STORM, state -> new TestSkyEvent(state));
-        factory.register(SkyEventType.SKY_CHEST, state -> new TestSkyEvent(state));
-        factory.register(SkyEventType.MOB_INVASION, state -> new TestSkyEvent(state));
-        factory.register(SkyEventType.MINERAL_RAIN, state -> new TestSkyEvent(state));
-        factory.register(SkyEventType.GROWTH_BOOST, state -> new TestSkyEvent(state));
+        factory.register(SkyEventType.METEOR, (state, ctx) -> new TestSkyEvent(state));
+        factory.register(SkyEventType.STORM, (state, ctx) -> new TestSkyEvent(state));
+        factory.register(SkyEventType.SKY_CHEST, (state, ctx) -> new TestSkyEvent(state));
+        factory.register(SkyEventType.MOB_INVASION, (state, ctx) -> new TestSkyEvent(state));
+        factory.register(SkyEventType.MINERAL_RAIN, (state, ctx) -> new TestSkyEvent(state));
+        factory.register(SkyEventType.GROWTH_BOOST, (state, ctx) -> new TestSkyEvent(state));
     }
 
     @Test
     void testCreateMeteorEvent() {
-        SkyEvent event = factory.create(SkyEventType.METEOR, "test-server", Duration.ofSeconds(180));
+        SkyEvent event = factory.create(SkyEventType.METEOR, "test-server", Duration.ofSeconds(180), null);
         assertEquals(SkyEventType.METEOR, event.getType());
         assertNotNull(event.getId());
         assertEquals("test-server", event.getServerId());
@@ -43,14 +44,14 @@ class SkyEventFactoryTest {
     @Test
     void testCreateAllEventTypes() {
         for (SkyEventType type : SkyEventType.values()) {
-            SkyEvent event = factory.create(type, "test-server", Duration.ofSeconds(60));
+            SkyEvent event = factory.create(type, "test-server", Duration.ofSeconds(60), null);
             assertEquals(type, event.getType());
         }
     }
 
     @Test
     void testCreateFromState() {
-        SkyEvent original = factory.create(SkyEventType.METEOR, "test-server", Duration.ofSeconds(180));
+        SkyEvent original = factory.create(SkyEventType.METEOR, "test-server", Duration.ofSeconds(180), null);
         EventState state = new EventState(
                 original.getId(),
                 original.getType(),
@@ -61,7 +62,7 @@ class SkyEventFactoryTest {
                 java.util.Map.of()
         );
 
-        SkyEvent restored = factory.createFromState(state);
+        SkyEvent restored = factory.createFromState(state, null);
         assertEquals(original.getId(), restored.getId());
         assertEquals(SkyEventType.METEOR, restored.getType());
         assertEquals(SkyEventStatus.ACTIVE, restored.getStatus());
@@ -71,7 +72,7 @@ class SkyEventFactoryTest {
     void testUnregisteredTypeThrows() {
         SkyEventFactory newFactory = new SkyEventFactory();
         assertThrows(IllegalArgumentException.class, () ->
-                newFactory.create(SkyEventType.METEOR, "test", Duration.ofSeconds(60))
+                newFactory.create(SkyEventType.METEOR, "test", Duration.ofSeconds(60), null)
         );
     }
 
@@ -102,11 +103,16 @@ class SkyEventFactoryTest {
         @Override public UUID getId() { return id; }
         @Override public SkyEventType getType() { return type; }
         @Override public String getServerId() { return serverId; }
+        @Override public com.valorsky.skysignals.model.EventScope getScope() { return com.valorsky.skysignals.model.EventScope.SERVER; }
+        @Override public Instant getScheduledAt() { return startedAt; }
         @Override public Instant getStartedAt() { return startedAt; }
         @Override public Instant getEndsAt() { return endsAt; }
         @Override public SkyEventStatus getStatus() { return status; }
+        @Override public com.valorsky.skysignals.model.SkyEventPhase getPhase() { return com.valorsky.skysignals.model.SkyEventPhase.SCHEDULED; }
+        @Override public long getElapsedSeconds() { return 0; }
         @Override public void start() { status = SkyEventStatus.ACTIVE; }
-        @Override public void tick() {}
+        @Override public void onPhaseChange(com.valorsky.skysignals.model.SkyEventPhase phase) {}
+        @Override public void tick(long elapsedSeconds) {}
         @Override public void stop() { status = SkyEventStatus.FINISHED; }
         @Override public void cancel() { status = SkyEventStatus.CANCELLED; }
     }

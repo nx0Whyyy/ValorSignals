@@ -74,12 +74,12 @@ class CacheServiceTest {
         EventState active = new EventState(
                 UUID.randomUUID(), SkyEventType.METEOR, "server1",
                 Instant.now(), Instant.now().plusSeconds(120),
-                SkyEventStatus.ACTIVE, Map.of()
+                 SkyEventStatus.ACTIVE, java.util.Collections.emptyMap()
         );
         EventState finished = new EventState(
                 UUID.randomUUID(), SkyEventType.STORM, "server1",
                 Instant.now(), Instant.now().plusSeconds(120),
-                SkyEventStatus.FINISHED, Map.of()
+                 SkyEventStatus.FINISHED, java.util.Collections.emptyMap()
         );
         cache.put(active.id().toString(), active);
         cache.put(finished.id().toString(), finished);
@@ -113,7 +113,7 @@ class CacheServiceTest {
         return new EventState(
                 UUID.randomUUID(), SkyEventType.METEOR, "test-server",
                 Instant.now(), Instant.now().plusSeconds(300),
-                SkyEventStatus.ACTIVE, Map.of()
+                 SkyEventStatus.ACTIVE, java.util.Collections.emptyMap()
         );
     }
 }

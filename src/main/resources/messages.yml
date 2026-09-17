@@ -1,36 +1,75 @@
 prefix: "<gradient:#9333ea:#3b82f6>SkySignals</gradient>"
 
 meteor:
-  start: "<yellow>☄ SIGNAL CÉLESTE</yellow>\n<gray>Une météorite vient d'entrer dans l'atmosphère !</gray>\n<gray>📍 Direction : <white>%direction%</white></gray>"
-  end: "<green>La météorite s'est dissipée.</green>"
-  bossbar: "☄ Météorite - %time%"
+  announcement: "<gradient:#9333ea:#3b82f6>☄ SIGNAL CÉLESTE</gradient>"
+  start: "<yellow>Une anomalie vient d'être détectée dans l'atmosphère."
+  warning: "<red>☄ IMPACT IMMINENT\n<white>Impact dans <yellow>%time%</white> secondes"
+  impact: "<gold>💥 La météorite vient de frapper !"
+  direction: "<gray>📍 Direction : <white>%direction%</white></gray>"
+  crater: "<gold>☄ CRATÈRE MÉTÉORITIQUE\n<gray>Récompenses disponibles"
+  finish: "<green>La météorite s'est dissipée."
 
 storm:
-  start: "<aqua>🌩 Un orage rare traverse le ciel !"
-  end: "<green>L'orage céleste se dissipe.</gray>"
-  bossbar: "🌩 Orage - %time%"
+  announcement: "<aqua>🌩 ANOMALIE MÉTÉOROLOGIQUE</aqua>"
+  start: "<gray>Une tempête céleste approche..."
+  transition: "<gray>Le ciel s'assombrit..."
+  warning: "<yellow>⚡ La tempête éclate !"
+  active: "<aqua>🌩 Orage céleste en cours"
+  finish: "<green>La tempête commence à se dissiper."
 
-sky-chest:
-  start: "<gold>🎁 Une caisse céleste vient d'apparaître !</gold>"
-  end: "<green>La caisse céleste s'est évaporée.</green>"
-  bossbar: "🎁 Caisse Céleste - %time%"
+sky_chest:
+  announcement: "<gold>🎁 CAISSE CÉLESTE</gold>"
+  descending: "<yellow>Une caisse mystérieuse descend du ciel..."
+  beam: "<aqua>✨ Un faisceau lumineux marque l'emplacement"
+  landing: "<gold>🎁 La caisse a atterri !"
+  unlocking: "<yellow>🔒 CAISSE CÉLESTE\n<white>Déverrouillage dans <yellow>%time%</white>s"
+  unlocked: "<green>La caisse est maintenant déverrouillée !"
+  claimed: "<gray>Cette caisse a déjà été récupérée."
+  finish: "<green>La caisse céleste s'est évaporée."
 
-mob-invasion:
-  start: "<red>👾 Une invasion de créatures commence !</red>"
-  end: "<green>L'invasion est repoussée.</green>"
-  bossbar: "👾 Invasion - %time%"
+mob_invasion:
+  announcement: "<red>👾 INVASION CÉLESTE</red>"
+  wave: "<yellow>Vague <white>%wave%</white>/<white>%max%</white>"
+  remaining: "<gray>Mobs restants : <white>%count%</white>"
+  wave_cleared: "<green>Vague <white>%wave%</white> éliminée !"
+  finish: "<green>L'invasion est repoussée."
 
-mineral-rain:
-  start: "<aqua>💎 Une pluie de minerais commence !</aqua>"
-  end: "<green>La pluie de minerais cesse.</green>"
-  bossbar: "💎 Pluie de Minerais - %time%"
+mineral_rain:
+  announcement: "<aqua>💎 PLUIE DE MINERAIS</aqua>"
+  start: "<gray>Le ciel commence à laisser tomber des minerais..."
+  active: "<aqua>💎 Pluie de minerais en cours"
+  finish: "<green>La pluie de minerais est terminée."
 
-growth-boost:
-  start: "<green>🌱 La croissance céleste commence !</green>"
-  end: "<green>La croissance céleste prend fin.</green>"
-  bossbar: "🌱 Croissance - %time%"
+growth_boost:
+  announcement: "<green>🌱 CROISSANCE CÉLESTE</green>"
+  start: "<gray>La nature semble accélérer..."
+  active: "<green>🌱 Croissance céleste active"
+  boosted: "<green>🌱 Votre culture a été boostée !"
+  finish: "<green>La croissance céleste est terminée."
 
-no-permission: "<red>Vous n'avez pas la permission.</red>"
-reloaded: "<green>Configuration rechargée.</green>"
-event-started: "<green>Événement <white>%event%</white> démarré.</green>"
-event-stopped: "<green>Événement arrêté.</green>"
+global:
+  event_detected: "<gradient:#9333ea:#3b82f6>%symbol% %name%</gradient>\n<gray>%description%</gray>"
+  direction_prefix: "📍 Direction : "
+
+errors:
+  no-permission: "<red>Vous n'avez pas la permission."
+  event-not-found: "<red>Événement introuvable."
+  event-already-active: "<red>Cet événement est déjà actif."
+  infrastructure: "<red>Une dépendance externe est indisponible."
+  invalid-location: "<red>Impossible de trouver un emplacement sûr."
+  reward-already-claimed: "<red>Vous avez déjà réclamé cette récompense."
+
+commands:
+  reloaded: "<green>Configuration rechargée."
+  event-started: "<green>Événement <white>%event%</white> démarré."
+  event-stopped: "<green>Événement arrêté."
+  test-started: "<green>Test de <white>%event%</white> lancé (sans récompenses)."
+  history-header: "<gradient:#9333ea:#3b82f6>☁ HISTORIQUE SKY SIGNALS</gradient>"
+  history-entry: "<gray>%symbol% <white>%name%</white> <dark_gray>- Il y a %time%</dark_gray>"
+  debug-header: "<gradient:#9333ea:#3b82f6>SkySignals Debug</gradient>"
+  info-header: "<gradient:#9333ea:#3b82f6>SkySignals Info</gradient>"
+
+placeholders:
+  active: "<green>Oui</green>"
+  inactive: "<red>Non</red>"
+  none: "<gray>Aucun</gray>"

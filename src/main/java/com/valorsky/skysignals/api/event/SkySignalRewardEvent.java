@@ -1,39 +1,40 @@
 package com.valorsky.skysignals.api.event;
 
-import com.valorsky.skysignals.model.EventState;
-import org.bukkit.entity.Player;
+import com.valorsky.skysignals.model.SkyEvent;
+import com.valorsky.skysignals.reward.RewardResult;
 import org.bukkit.event.Event;
 import org.bukkit.event.HandlerList;
-import org.jetbrains.annotations.NotNull;
 
-public final class SkySignalRewardEvent extends Event {
+import java.util.UUID;
+
+public class SkySignalRewardEvent extends Event {
 
     private static final HandlerList handlers = new HandlerList();
+    private final SkyEvent event;
+    private final UUID playerId;
+    private final RewardResult result;
 
-    private final EventState state;
-    private final Player player;
-    private final Object reward;
-
-    public SkySignalRewardEvent(EventState state, Player player, Object reward) {
-        this.state = state;
-        this.player = player;
-        this.reward = reward;
+    public SkySignalRewardEvent(SkyEvent event, UUID playerId, RewardResult result) {
+        super(true);
+        this.event = event;
+        this.playerId = playerId;
+        this.result = result;
     }
 
-    public EventState getState() {
-        return state;
+    public SkyEvent getSkyEvent() {
+        return event;
     }
 
-    public Player getPlayer() {
-        return player;
+    public UUID getPlayerId() {
+        return playerId;
     }
 
-    public Object getReward() {
-        return reward;
+    public RewardResult getResult() {
+        return result;
     }
 
     @Override
-    public @NotNull HandlerList getHandlers() {
+    public HandlerList getHandlers() {
         return handlers;
     }
 

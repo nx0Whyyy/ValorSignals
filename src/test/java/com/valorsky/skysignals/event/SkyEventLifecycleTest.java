@@ -44,7 +44,7 @@ class SkyEventLifecycleTest {
     }
 
     @Test
-    void testProgressDecreasesOverTime() {
+    void testProgressIncreasesOverTime() {
         TestEvent event = new TestEvent(Instant.now().minusSeconds(300), Instant.now().plusSeconds(300));
         event.start();
         double initialProgress = event.getProgress();
@@ -52,7 +52,7 @@ class SkyEventLifecycleTest {
             Thread.sleep(1100);
         } catch (InterruptedException ignored) {}
         double laterProgress = event.getProgress();
-        assertTrue(laterProgress < initialProgress);
+        assertTrue(laterProgress > initialProgress);
     }
 
     @Test
@@ -80,11 +80,16 @@ class SkyEventLifecycleTest {
         @Override public java.util.UUID getId() { return java.util.UUID.randomUUID(); }
         @Override public SkyEventType getType() { return SkyEventType.METEOR; }
         @Override public String getServerId() { return "test"; }
+        @Override public com.valorsky.skysignals.model.EventScope getScope() { return com.valorsky.skysignals.model.EventScope.SERVER; }
+        @Override public Instant getScheduledAt() { return startedAt; }
         @Override public Instant getStartedAt() { return startedAt; }
         @Override public Instant getEndsAt() { return endsAt; }
         @Override public SkyEventStatus getStatus() { return status; }
+        @Override public com.valorsky.skysignals.model.SkyEventPhase getPhase() { return com.valorsky.skysignals.model.SkyEventPhase.SCHEDULED; }
+        @Override public long getElapsedSeconds() { return 0; }
         @Override public void start() { status = SkyEventStatus.ACTIVE; }
-        @Override public void tick() {}
+        @Override public void onPhaseChange(com.valorsky.skysignals.model.SkyEventPhase phase) {}
+        @Override public void tick(long elapsedSeconds) {}
         @Override public void stop() { status = SkyEventStatus.FINISHED; }
         @Override public void cancel() { status = SkyEventStatus.CANCELLED; }
     }

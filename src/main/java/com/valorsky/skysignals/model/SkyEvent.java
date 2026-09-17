@@ -11,19 +11,32 @@ public interface SkyEvent {
 
     String getServerId();
 
+    EventScope getScope();
+
+    Instant getScheduledAt();
+
     Instant getStartedAt();
 
     Instant getEndsAt();
 
     SkyEventStatus getStatus();
 
+    SkyEventPhase getPhase();
+
+    long getElapsedSeconds();
+
     default boolean isExpired() {
-        return Instant.now().isAfter(getEndsAt()) && getStatus() == SkyEventStatus.ACTIVE;
+        return Instant.now().isAfter(getEndsAt()) &&
+               (getStatus() == SkyEventStatus.ACTIVE ||
+                getStatus() == SkyEventStatus.ANNOUNCING ||
+                getStatus() == SkyEventStatus.WARNING);
     }
 
     void start();
 
-    void tick();
+    void onPhaseChange(SkyEventPhase phase);
+
+    void tick(long elapsedSeconds);
 
     void stop();
 
@@ -32,9 +45,9 @@ public interface SkyEvent {
     default double getProgress() {
         Instant now = Instant.now();
         long total = getEndsAt().getEpochSecond() - getStartedAt().getEpochSecond();
-        long remaining = getEndsAt().getEpochSecond() - now.getEpochSecond();
+        long elapsed = now.getEpochSecond() - getStartedAt().getEpochSecond();
         if (total <= 0) return 0.0;
-        return Math.max(0.0, (double) remaining / (double) total);
+        return Math.min(1.0, Math.max(0.0, (double) elapsed / (double) total));
     }
 
     default long getSecondsRemaining() {

@@ -3,19 +3,21 @@ package com.valorsky.skysignals.model;
 import java.util.Map;
 
 public enum SkyEventType {
-    METEOR("☄", "Météorite"),
-    STORM("🌩", "Orage"),
-    SKY_CHEST("🎁", "Caisse Céleste"),
-    MOB_INVASION("👾", "Invasion"),
-    MINERAL_RAIN("💎", "Pluie de Minerais"),
-    GROWTH_BOOST("🌱", "Croissance Céleste");
+    METEOR("☄", "Météorite", "meteor"),
+    STORM("🌩", "Orage", "storm"),
+    SKY_CHEST("🎁", "Caisse Céleste", "sky_chest"),
+    MOB_INVASION("👾", "Invasion Céleste", "mob_invasion"),
+    MINERAL_RAIN("💎", "Pluie de Minerais", "mineral_rain"),
+    GROWTH_BOOST("🌱", "Croissance Céleste", "growth_boost");
 
     private final String symbol;
     private final String displayName;
+    private final String configKey;
 
-    SkyEventType(String symbol, String displayName) {
+    SkyEventType(String symbol, String displayName, String configKey) {
         this.symbol = symbol;
         this.displayName = displayName;
+        this.configKey = configKey;
     }
 
     public String symbol() {
@@ -24,6 +26,10 @@ public enum SkyEventType {
 
     public String displayName() {
         return displayName;
+    }
+
+    public String configKey() {
+        return configKey;
     }
 
     public static SkyEventType fromId(String id) {
@@ -39,10 +45,6 @@ public enum SkyEventType {
                 return type;
             }
         }
-        return null;
-    }
-
-    public static Map<String, String> getAllowedEvents(com.valorsky.skysignals.config.Config config) {
         return null;
     }
 }

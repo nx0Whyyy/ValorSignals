@@ -18,7 +18,7 @@ plugins {
 }
 
 group = 'com.valorsky'
-version = '1.0.1'
+version = '2.0.0'
 description = 'Dynamic celestial events for ValorSky'
 
 java {
@@ -97,6 +97,22 @@ shadowJar {
 }
 
 build.finalizedBy(shadowJar)
+
+tasks.register('dist', Zip) {
+    group = 'build'
+    description = 'Creates a distribution ZIP with the plugin JAR and default config'
+    archiveBaseName = 'ValorSky-SkySignals'
+    archiveClassifier = ''
+    destinationDirectory = file('build/distributions')
+    from(shadowJar) {
+        rename { "ValorSky-SkySignals-${version}.jar" }
+        into('plugins/')
+    }
+    from(sourceSets.main.resources) {
+        into('plugins/')
+    }
+    dependsOn(shadowJar)
+}
 
 publishing {
     publications {

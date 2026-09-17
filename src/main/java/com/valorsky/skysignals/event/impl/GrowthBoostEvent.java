@@ -1,71 +1,124 @@
 package com.valorsky.skysignals.event.impl;
 
 import com.valorsky.skysignals.event.AbstractSkyEvent;
-import com.valorsky.skysignals.model.EventState;
-import com.valorsky.skysignals.model.SkyEventStatus;
+import com.valorsky.skysignals.event.EventContext;
+import com.valorsky.skysignals.model.*;
+import com.valorsky.skysignals.config.Config;
 import com.valorsky.skysignals.notification.NotificationService;
+import com.valorsky.skysignals.particle.ParticleService;
+import com.valorsky.skysignals.particle.CircleShape;
+import com.valorsky.skysignals.sound.SoundService;
 import com.valorsky.skysignals.util.FoliaScheduler;
-import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.Material;
+import com.valorsky.skysignals.util.FoliaScheduler.TaskHandle;
+import org.bukkit.*;
 import org.bukkit.block.Block;
-import org.bukkit.block.BlockState;
 import org.bukkit.block.data.Ageable;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.HandlerList;
+import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockGrowEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
-public final class GrowthBoostEvent extends AbstractSkyEvent {
+public final class GrowthBoostEvent extends AbstractSkyEvent implements Listener {
 
     private final NotificationService notificationService;
+    private final ParticleService particleService;
+    private final SoundService soundService;
     private final Logger logger;
-    private final Set<Block> boostedBlocks = new HashSet<>();
-    private double multiplier;
-    private long tickCounter = 0;
 
-    public GrowthBoostEvent(EventState state, JavaPlugin plugin, NotificationService notificationService) {
+    private final double multiplier;
+    private final int visualCooldown;
+    private TaskHandle visualTask;
+    private final Set<Location> boostedBlocks = ConcurrentHashMap.newKeySet();
+    private final Map<Location, Long> lastVisual = new ConcurrentHashMap<>();
+
+    public GrowthBoostEvent(EventState state, JavaPlugin plugin, NotificationService notificationService,
+                            ParticleService particleService, SoundService soundService, Config config) {
         super(state, plugin);
         this.notificationService = notificationService;
+        this.particleService = particleService;
+        this.soundService = soundService;
         this.logger = plugin.getLogger();
+        this.multiplier = config.getGrowthBoostMultiplier();
+        this.visualCooldown = config.getGrowthBoostVisualCooldown();
+
+        // Register listener
+        plugin.getServer().getPluginManager().registerEvents(this, plugin);
     }
 
     @Override
-    public void start() {
+    protected void onAnnouncing() {
+        this.status = SkyEventStatus.ANNOUNCING;
+        notificationService.notifyEventPhase(this, "start");
+        soundService.playGlobal("growth_boost_start");
+    }
+
+    @Override
+    protected void onWarning() {
+        this.status = SkyEventStatus.WARNING;
+    }
+
+    @Override
+    protected void onActive() {
         this.status = SkyEventStatus.ACTIVE;
 
-        multiplier = plugin.getConfig().getDouble("growth-boost.multiplier", 2.0);
+        // Periodic visual effects on random crops
+        visualTask = FoliaScheduler.runGlobalTimer(plugin, this::showVisualEffects, 100L, 100L);
 
-        notificationService.notifyEventStart(this);
-        logger.info("Growth boost started with multiplier " + multiplier);
+        logger.info("Growth boost event started with multiplier " + multiplier);
     }
 
     @Override
-    public void tick() {
-        tickCounter++;
-        if (tickCounter % 40 == 0) {
-            for (Player player : Bukkit.getOnlinePlayers()) {
-                FoliaScheduler.runEntity(plugin, player, () -> boostNearbyCrops(player));
-            }
-        }
+    protected void onCompleting() {
+        this.status = SkyEventStatus.COMPLETING;
+        if (visualTask != null) visualTask.cancel();
     }
 
-    private void boostNearbyCrops(Player player) {
-        Location center = player.getLocation();
-        for (int x = -8; x <= 8; x++) {
-            for (int z = -8; z <= 8; z++) {
-                Block block = center.getWorld().getBlockAt(center.getBlockX() + x, center.getBlockY(), center.getBlockZ() + z);
-                BlockState state = block.getState();
-                if (state.getBlockData() instanceof Ageable ageable) {
-                    if (Math.random() < (0.15 * multiplier)) {
-                        int currentAge = ageable.getAge();
-                        int maxAge = ageable.getMaximumAge();
-                        if (currentAge < maxAge) {
-                            ageable.setAge(Math.min(maxAge, currentAge + 1));
-                            state.update();
-                            boostedBlocks.add(block);
+    @Override
+    protected void onFinished() {
+        this.status = SkyEventStatus.FINISHED;
+        HandlerList.unregisterAll(this);
+    }
+
+    @Override
+    protected void onCancelled() {
+        this.status = SkyEventStatus.CANCELLED;
+        if (visualTask != null) visualTask.cancel();
+        HandlerList.unregisterAll(this);
+    }
+
+    private void showVisualEffects() {
+        // Find random crops in loaded chunks and show particles
+        for (World world : Bukkit.getWorlds()) {
+            if (world.getEnvironment() != World.Environment.NORMAL) continue;
+
+            List<Player> players = world.getPlayers();
+            if (players.isEmpty()) continue;
+
+            for (Player player : players) {
+                Location loc = player.getLocation();
+                // Scan nearby blocks for crops
+                for (int x = -10; x <= 10; x++) {
+                    for (int z = -10; z <= 10; z++) {
+                        Block block = world.getBlockAt(loc.getBlockX() + x, loc.getBlockY(), loc.getBlockZ() + z);
+                        if (isGrowable(block)) {
+                            Location blockLoc = block.getLocation();
+                            Long last = lastVisual.get(blockLoc);
+                            long now = System.currentTimeMillis();
+                            if (last == null || now - last > visualCooldown * 50L) {
+                                lastVisual.put(blockLoc, now);
+                                List<Player> audience = getNearbyPlayers(blockLoc, 32);
+                                if (!audience.isEmpty()) {
+                                    particleService.spawnCircle(blockLoc, Particle.HAPPY_VILLAGER, 2, 5, 0.05, audience);
+                                }
+                            }
                         }
                     }
                 }
@@ -73,15 +126,86 @@ public final class GrowthBoostEvent extends AbstractSkyEvent {
         }
     }
 
+    @EventHandler
+    public void onBlockGrow(BlockGrowEvent event) {
+        if (getStatus() != SkyEventStatus.ACTIVE) return;
+
+        Block block = event.getBlock();
+        if (!isGrowable(block)) return;
+
+        // Apply growth boost by advancing age multiple times
+        if (block.getBlockData() instanceof Ageable ageable) {
+            int maxAge = ageable.getMaximumAge();
+            int currentAge = ageable.getAge();
+            int newAge = Math.min(maxAge, currentAge + (int) Math.ceil(multiplier));
+
+            if (newAge > currentAge) {
+                ageable.setAge(newAge);
+                block.setBlockData(ageable);
+
+                // Visual feedback
+                Location loc = block.getLocation();
+                Long last = lastVisual.get(loc);
+                long now = System.currentTimeMillis();
+                if (last == null || now - last > visualCooldown * 50L) {
+                    lastVisual.put(loc, now);
+                    List<Player> audience = getNearbyPlayers(loc, 32);
+                    if (!audience.isEmpty()) {
+                        particleService.spawnCircle(loc, Particle.HAPPY_VILLAGER, 3, 8, 0.1, audience);
+                        soundService.play("growth_boost_tick", loc, audience);
+                    }
+                }
+
+                // Notify player if nearby
+                for (Player player : getNearbyPlayers(loc, 16)) {
+                    // Could send action bar message
+                }
+            }
+        }
+    }
+
+    private boolean isGrowable(Block block) {
+        Material type = block.getType();
+        return type == Material.WHEAT || type == Material.CARROTS || type == Material.POTATOES
+            || type == Material.BEETROOTS || type == Material.NETHER_WART
+            || type == Material.MELON_STEM || type == Material.PUMPKIN_STEM
+            || type == Material.COCOA || type == Material.SWEET_BERRY_BUSH
+            || type == Material.CAVE_VINES || type == Material.CAVE_VINES_PLANT
+            || type == Material.KELP || type == Material.KELP_PLANT
+            || type == Material.BAMBOO || type == Material.BAMBOO_SAPLING
+            || type == Material.SUGAR_CANE || type == Material.CACTUS;
+    }
+
+    private List<Player> getNearbyPlayers(Location center, double radius) {
+        if (center == null || center.getWorld() == null) return List.of();
+        double radiusSq = radius * radius;
+        return center.getWorld().getPlayers().stream()
+            .filter(p -> p.getLocation().distanceSquared(center) <= radiusSq)
+            .toList();
+    }
+
+    @Override
+    public void tick(long elapsedSeconds) {
+        super.tick(elapsedSeconds);
+    }
+
     @Override
     public void stop() {
-        boostedBlocks.clear();
-        logger.info("Growth boost ended.");
+        if (visualTask != null) visualTask.cancel();
+        HandlerList.unregisterAll(this);
     }
 
     @Override
     public void cancel() {
         super.cancel();
         stop();
+    }
+
+    @Override
+    protected Map<String, Object> getExtraData() {
+        return Map.of(
+            "multiplier", multiplier,
+            "visualCooldown", visualCooldown
+        );
     }
 }

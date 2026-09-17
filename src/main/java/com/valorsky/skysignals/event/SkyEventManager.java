@@ -4,16 +4,12 @@ import com.valorsky.skysignals.cache.CacheService;
 import com.valorsky.skysignals.cache.LocalEventCache;
 import com.valorsky.skysignals.config.Config;
 import com.valorsky.skysignals.database.EventRepository;
-import com.valorsky.skysignals.model.EventState;
-import com.valorsky.skysignals.model.SkyEvent;
-import com.valorsky.skysignals.model.SkyEventStatus;
-import com.valorsky.skysignals.model.SkyEventType;
+import com.valorsky.skysignals.model.*;
 import com.valorsky.skysignals.notification.NotificationService;
 import com.valorsky.skysignals.rabbitmq.EventPublisher;
 import com.valorsky.skysignals.redis.RedisService;
-import org.bukkit.plugin.java.JavaPlugin;
-
 import com.valorsky.skysignals.util.FoliaScheduler;
+import org.bukkit.plugin.java.JavaPlugin;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -30,14 +26,17 @@ public class SkyEventManager {
     private final LocalEventCache localCache;
     private final RedisService redisService;
     private final EventPublisher eventPublisher;
-    private final EventRepository eventRepository;
+    private EventRepository eventRepository;
     private final NotificationService notificationService;
     private final Config config;
     private final Logger logger;
+    private final EventResourceRegistry resourceRegistry;
+    private EventContext eventContext;
 
     private final Map<UUID, SkyEvent> activeEvents = new ConcurrentHashMap<>();
-    private final Set<SkyEventType> registeredEventTypes = new HashSet<>();
+    private final Map<UUID, SkyEventPhase> eventPhases = new ConcurrentHashMap<>();
     private FoliaScheduler.TaskHandle tickTask;
+    private boolean initialized = false;
 
     public SkyEventManager(
             JavaPlugin plugin,
@@ -60,11 +59,17 @@ public class SkyEventManager {
         this.notificationService = notificationService;
         this.config = config;
         this.logger = plugin.getLogger();
+        this.resourceRegistry = new EventResourceRegistry(plugin);
+    }
+
+    public void setEventContext(EventContext context) {
+        this.eventContext = context;
     }
 
     public void initialize() {
         restoreEventsFromRedis();
         startTickTask();
+        initialized = true;
         logger.info("SkyEventManager initialized with " + activeEvents.size() + " event(s) restored.");
     }
 
@@ -75,28 +80,35 @@ public class SkyEventManager {
     public void tick() {
         if (activeEvents.isEmpty()) return;
 
-        List<SkyEvent> toRemove = new ArrayList<>();
-        for (SkyEvent event : activeEvents.values()) {
+        Instant now = Instant.now();
+        List<SkyEvent> toProcess = new ArrayList<>(activeEvents.values());
+
+        for (SkyEvent event : toProcess) {
             try {
-                if (event.getStatus() == SkyEventStatus.ACTIVE) {
+                if (event.getStatus() == SkyEventStatus.ACTIVE ||
+                    event.getStatus() == SkyEventStatus.ANNOUNCING ||
+                    event.getStatus() == SkyEventStatus.WARNING ||
+                    event.getStatus() == SkyEventStatus.COMPLETING) {
+
+                    long elapsed = now.getEpochSecond() - event.getStartedAt().getEpochSecond();
+                    event.tick(elapsed);
+
                     if (event.isExpired()) {
-                        finishEvent(event, true);
-                    } else {
-                        event.tick();
+                        FoliaScheduler.runGlobal(plugin, () -> finishEvent(event, true));
                     }
                 }
             } catch (Exception e) {
                 logger.warning("Error ticking event " + event.getId() + ": " + e.getMessage());
-                toRemove.add(event);
+                FoliaScheduler.runGlobal(plugin, () -> finishEvent(event, false));
             }
         }
     }
 
-    public CompletableFuture<SkyEvent> createEvent(SkyEventType type) {
-        return createEvent(type, config.serverId());
+    public CompletableFuture<SkyEvent> createEvent(SkyEventType type, EventContext context) {
+        return createEvent(type, config.serverId(), context);
     }
 
-    public CompletableFuture<SkyEvent> createEvent(SkyEventType type, String serverId) {
+    public CompletableFuture<SkyEvent> createEvent(SkyEventType type, String serverId, EventContext context) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 if (!factory.isRegistered(type)) {
@@ -108,16 +120,18 @@ public class SkyEventManager {
                 }
 
                 int duration = config.getEventDuration(type);
-                SkyEvent event = factory.create(type, serverId, Duration.ofSeconds(duration));
+                int warningDuration = config.getEventWarningDuration(type);
+                Instant now = Instant.now();
 
-                EventState state = toState(event);
+                SkyEvent event = factory.create(type, serverId, Duration.ofSeconds(duration), context);
+
+                EventState state = toState(event, SkyEventStatus.SCHEDULED, SkyEventPhase.SCHEDULED, 0);
                 cache.put(state.id().toString(), state);
                 localCache.put(event);
                 if (redisService != null && redisService.isConnected()) {
                     redisService.storeEventState(state);
                 }
                 eventRepository.saveEventState(state);
-
                 eventPublisher.publish("event.created", state);
 
                 logger.info("Event created: " + type + " [" + event.getId() + "]");
@@ -134,30 +148,64 @@ public class SkyEventManager {
             activeEvents.put(event.getId(), event);
         }
 
-         EventState state = toState(event).withStatus(SkyEventStatus.ACTIVE);
-        state = new EventState(state.id(), state.type(), state.serverId(), Instant.now(), state.endsAt(), SkyEventStatus.ACTIVE, state.data());
+        Instant now = Instant.now();
+        EventState state = toState(event, SkyEventStatus.ANNOUNCING, SkyEventPhase.ANNOUNCING, 0);
+        state = state.withStatus(SkyEventStatus.ANNOUNCING).withPhase(SkyEventPhase.ANNOUNCING);
 
         cache.put(state.id().toString(), state);
         localCache.put(event);
-        redisService.updateEventState(state);
-        eventRepository.updateEventStatus(state.id(), SkyEventStatus.ACTIVE, Instant.now());
+        if (redisService != null && redisService.isConnected()) {
+            redisService.updateEventState(state);
+        }
+        eventRepository.updateEventStatus(state.id(), SkyEventStatus.ANNOUNCING, now);
 
-        event.start();
+        event.onPhaseChange(SkyEventPhase.ANNOUNCING);
         notificationService.notifyEventStart(event);
         eventPublisher.publish("event.started", state);
 
-        logger.info("Event started: " + event.getType() + " [" + event.getId() + "]");
+        logger.info("Event announcing: " + event.getType() + " [" + event.getId() + "]");
     }
 
-    public CompletableFuture<Void> startEvent(SkyEventType type) {
-        return CompletableFuture.runAsync(() -> {
-            try {
-        SkyEvent event = createEvent(type).join();
-        FoliaScheduler.runGlobal(plugin, () -> startEvent(event));
-            } catch (Exception e) {
-                logger.warning("Failed to start event " + type + ": " + e.getMessage());
-            }
-        });
+    public CompletableFuture<Void> startEvent(SkyEventType type, EventContext context) {
+        return createEvent(type, context)
+            .thenCompose(event -> CompletableFuture.runAsync(() ->
+                FoliaScheduler.runGlobal(plugin, () -> startEvent(event))
+            ));
+    }
+
+    public void transitionPhase(SkyEvent event, SkyEventPhase newPhase) {
+        eventPhases.put(event.getId(), newPhase);
+        event.onPhaseChange(newPhase);
+
+        Instant now = Instant.now();
+        long elapsed = now.getEpochSecond() - event.getStartedAt().getEpochSecond();
+
+        SkyEventStatus status = phaseToStatus(newPhase);
+        EventState state = toState(event, status, newPhase, elapsed);
+
+        cache.put(state.id().toString(), state);
+        localCache.put(event);
+        if (redisService != null && redisService.isConnected()) {
+            redisService.updateEventState(state);
+        }
+        eventRepository.updateEventStatus(state.id(), status, now);
+
+        notificationService.notifyEventPhase(event, newPhase.name().toLowerCase());
+        eventPublisher.publish("event.updated", state);
+
+        logger.info("Event " + event.getType() + " [" + event.getId() + "] phase: " + newPhase);
+    }
+
+    private SkyEventStatus phaseToStatus(SkyEventPhase phase) {
+        return switch (phase) {
+            case SCHEDULED -> SkyEventStatus.SCHEDULED;
+            case ANNOUNCING -> SkyEventStatus.ANNOUNCING;
+            case WARNING -> SkyEventStatus.WARNING;
+            case ACTIVE -> SkyEventStatus.ACTIVE;
+            case COMPLETING -> SkyEventStatus.COMPLETING;
+            case FINISHED -> SkyEventStatus.FINISHED;
+            case CANCELLED -> SkyEventStatus.CANCELLED;
+        };
     }
 
     public void finishEvent(SkyEvent event, boolean natural) {
@@ -166,14 +214,20 @@ public class SkyEventManager {
         }
 
         activeEvents.remove(event.getId());
+        resourceRegistry.cleanup(event.getId());
 
         event.stop();
 
-        EventState state = toState(event).withStatus(SkyEventStatus.FINISHED);
+        Instant now = Instant.now();
+        EventState state = toState(event, SkyEventStatus.FINISHED, SkyEventPhase.FINISHED,
+            now.getEpochSecond() - event.getStartedAt().getEpochSecond());
+
         cache.put(state.id().toString(), state);
         localCache.remove(state.id().toString());
-        redisService.removeEventState(state.id().toString());
-        eventRepository.updateEventStatus(state.id(), SkyEventStatus.FINISHED, Instant.now());
+        if (redisService != null && redisService.isConnected()) {
+            redisService.removeEventState(state.id().toString());
+        }
+        eventRepository.updateEventStatus(state.id(), SkyEventStatus.FINISHED, now);
 
         notificationService.notifyEventEnd(event);
         eventPublisher.publish("event.finished", state);
@@ -188,16 +242,21 @@ public class SkyEventManager {
             event = localCache.get(eventId.toString());
             if (event == null) return;
         }
+
+        resourceRegistry.cleanup(eventId);
         event.cancel();
         event.stop();
 
-        EventState state = toState(event).withStatus(SkyEventStatus.CANCELLED);
+        Instant now = Instant.now();
+        EventState state = toState(event, SkyEventStatus.CANCELLED, SkyEventPhase.CANCELLED,
+            now.getEpochSecond() - event.getStartedAt().getEpochSecond());
+
         cache.put(state.id().toString(), state);
         localCache.remove(state.id().toString());
         if (redisService != null && redisService.isConnected()) {
             redisService.removeEventState(state.id().toString());
         }
-        eventRepository.updateEventStatus(state.id(), SkyEventStatus.CANCELLED, Instant.now());
+        eventRepository.updateEventStatus(state.id(), SkyEventStatus.CANCELLED, now);
 
         notificationService.notifyEventEnd(event);
         eventPublisher.publish("event.cancelled", state);
@@ -222,6 +281,10 @@ public class SkyEventManager {
         return activeEvents.values().stream().anyMatch(e -> e.getType() == type);
     }
 
+    public EventResourceRegistry getResourceRegistry() {
+        return resourceRegistry;
+    }
+
     private boolean canStartNewEvent() {
         if (!config.eventsAllowConcurrent()) {
             return activeEvents.isEmpty();
@@ -229,12 +292,17 @@ public class SkyEventManager {
         return activeEvents.size() < config.eventsMaxActive();
     }
 
+    public void handleEventCreated(EventState state) {
+        FoliaScheduler.runGlobal(plugin, () -> {
+            if (activeEvents.containsKey(state.id())) return;
+            cache.put(state.id().toString(), state);
+        });
+    }
+
     public void handleEventStarted(EventState state) {
         FoliaScheduler.runGlobal(plugin, () -> {
-            if (activeEvents.containsKey(state.id())) {
-                return;
-            }
-            SkyEvent event = factory.createFromState(state);
+            if (activeEvents.containsKey(state.id())) return;
+             SkyEvent event = factory.createFromState(state, eventContext);
             activeEvents.put(state.id(), event);
             localCache.put(event);
             cache.put(state.id().toString(), state);
@@ -252,24 +320,24 @@ public class SkyEventManager {
                 event.stop();
                 notificationService.notifyEventEnd(event);
             }
+            resourceRegistry.cleanup(state.id());
             logger.info("Event finished (synchronized): " + state.type() + " [" + state.id() + "]");
         });
     }
 
-    public void handleEventCreated(EventState state) {
-        if (state.serverId().equals(config.serverId())) return;
-         cache.put(state.id().toString(), state);
-    }
-
-    private EventState toState(SkyEvent event) {
+    private EventState toState(SkyEvent event, SkyEventStatus status, SkyEventPhase phase, long elapsedSeconds) {
         return new EventState(
-                event.getId(),
-                event.getType(),
-                event.getServerId(),
-                event.getStartedAt(),
-                event.getEndsAt(),
-                event.getStatus(),
-                Map.of()
+            event.getId(),
+            event.getType(),
+            event.getServerId(),
+            event.getScope(),
+            event.getScheduledAt(),
+            event.getStartedAt(),
+            event.getEndsAt(),
+            status,
+            phase,
+            elapsedSeconds,
+            event instanceof AbstractSkyEvent ae ? ae.getExtraData() : Map.of()
         );
     }
 
@@ -281,17 +349,21 @@ public class SkyEventManager {
         try {
             List<EventState> states = redisService.getAllActiveEvents();
             for (EventState state : states) {
-                if (state.serverId().equals(config.serverId()) && state.status() == SkyEventStatus.ACTIVE) {
+                if (state.serverId().equals(config.serverId()) &&
+                    (state.status() == SkyEventStatus.ACTIVE ||
+                     state.status() == SkyEventStatus.ANNOUNCING ||
+                     state.status() == SkyEventStatus.WARNING)) {
+
                     if (state.endsAt().isBefore(Instant.now())) {
                         redisService.removeEventState(state.id().toString());
                         eventRepository.updateEventStatus(state.id(), SkyEventStatus.FINISHED, Instant.now());
                         logger.info("Expired event cleaned up: " + state.type() + " [" + state.id() + "]");
                     } else {
-                        SkyEvent event = factory.createFromState(state);
+                        SkyEvent event = factory.createFromState(state, eventContext);
                         event.start();
-                         activeEvents.put(state.id(), event);
-                         localCache.put(event);
-                         cache.put(state.id().toString(), state);
+                        activeEvents.put(state.id(), event);
+                        localCache.put(event);
+                        cache.put(state.id().toString(), state);
                         logger.info("Restored event: " + state.type() + " [" + state.id() + "]");
                     }
                 }
@@ -308,9 +380,12 @@ public class SkyEventManager {
         for (SkyEvent event : new ArrayList<>(activeEvents.values())) {
             finishEvent(event, false);
         }
+        resourceRegistry.cleanupAll();
         activeEvents.clear();
+        eventPhases.clear();
         cache.clear();
         localCache.clear();
+        initialized = false;
     }
 
     public void reload() {
@@ -319,11 +394,15 @@ public class SkyEventManager {
         startTickTask();
     }
 
-    public java.util.Set<SkyEventType> getRegisteredEventTypes() {
+    public Set<SkyEventType> getRegisteredEventTypes() {
         return factory.getRegisteredTypes();
     }
 
     public EventRepository getEventRepository() {
         return eventRepository;
+    }
+
+    public boolean isInitialized() {
+        return initialized;
     }
 }

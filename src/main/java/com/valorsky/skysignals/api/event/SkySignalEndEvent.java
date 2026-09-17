@@ -1,26 +1,31 @@
 package com.valorsky.skysignals.api.event;
 
-import com.valorsky.skysignals.model.EventState;
+import com.valorsky.skysignals.model.SkyEvent;
 import org.bukkit.event.Event;
 import org.bukkit.event.HandlerList;
-import org.jetbrains.annotations.NotNull;
 
-public final class SkySignalEndEvent extends Event {
+public class SkySignalEndEvent extends Event {
 
     private static final HandlerList handlers = new HandlerList();
+    private final SkyEvent event;
+    private final boolean cancelled;
 
-    private final EventState state;
-
-    public SkySignalEndEvent(EventState state) {
-        this.state = state;
+    public SkySignalEndEvent(SkyEvent event, boolean cancelled) {
+        super(true);
+        this.event = event;
+        this.cancelled = cancelled;
     }
 
-    public EventState getState() {
-        return state;
+    public SkyEvent getSkyEvent() {
+        return event;
+    }
+
+    public boolean wasCancelled() {
+        return cancelled;
     }
 
     @Override
-    public @NotNull HandlerList getHandlers() {
+    public HandlerList getHandlers() {
         return handlers;
     }
 

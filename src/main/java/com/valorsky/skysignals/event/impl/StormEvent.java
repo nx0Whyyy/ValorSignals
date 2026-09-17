@@ -1,49 +1,98 @@
 package com.valorsky.skysignals.event.impl;
 
 import com.valorsky.skysignals.event.AbstractSkyEvent;
-import com.valorsky.skysignals.model.EventState;
-import com.valorsky.skysignals.model.SkyEventStatus;
-import com.valorsky.skysignals.model.SkyEventType;
+import com.valorsky.skysignals.event.SkyEventManager;
+import com.valorsky.skysignals.model.*;
 import com.valorsky.skysignals.notification.NotificationService;
+import com.valorsky.skysignals.particle.ParticleService;
+import com.valorsky.skysignals.particle.CloudShape;
 import com.valorsky.skysignals.reward.RewardService;
+import com.valorsky.skysignals.sound.SoundService;
 import com.valorsky.skysignals.util.FoliaScheduler;
 import com.valorsky.skysignals.util.FoliaScheduler.TaskHandle;
-import org.bukkit.Bukkit;
-import org.bukkit.WeatherType;
-import org.bukkit.World;
+import org.bukkit.*;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
 public final class StormEvent extends AbstractSkyEvent {
 
     private final NotificationService notificationService;
     private final RewardService rewardService;
+    private final ParticleService particleService;
+    private final SoundService soundService;
     private final Logger logger;
 
+    private World world;
     private boolean wasStorming = false;
     private boolean wasThundering = false;
-    private transient TaskHandle stormTask;
-    private World world;
+    private TaskHandle stormTask;
+    private TaskHandle lightningTask;
+    private final AtomicInteger lightningCounter = new AtomicInteger(0);
 
-    public StormEvent(EventState state, JavaPlugin plugin, NotificationService notificationService, RewardService rewardService) {
+    public StormEvent(EventState state, JavaPlugin plugin, NotificationService notificationService,
+                      RewardService rewardService, ParticleService particleService,
+                      SoundService soundService) {
         super(state, plugin);
         this.notificationService = notificationService;
         this.rewardService = rewardService;
+        this.particleService = particleService;
+        this.soundService = soundService;
         this.logger = plugin.getLogger();
     }
 
     @Override
     public void start() {
-        this.status = SkyEventStatus.ACTIVE;
+        super.start();
+    }
 
+    @Override
+    protected void onAnnouncing() {
+        this.status = SkyEventStatus.ANNOUNCING;
+        findWorldAndPrepare();
+    }
+
+    @Override
+    protected void onWarning() {
+        this.status = SkyEventStatus.WARNING;
+        startTransition();
+    }
+
+    @Override
+    protected void onActive() {
+        this.status = SkyEventStatus.ACTIVE;
+        startStorm();
+    }
+
+    @Override
+    protected void onCompleting() {
+        this.status = SkyEventStatus.COMPLETING;
+        startDissipation();
+    }
+
+    @Override
+    protected void onFinished() {
+        this.status = SkyEventStatus.FINISHED;
+        restoreWeather();
+    }
+
+    @Override
+    protected void onCancelled() {
+        this.status = SkyEventStatus.CANCELLED;
+        restoreWeather();
+    }
+
+    private void findWorldAndPrepare() {
         world = Bukkit.getOnlinePlayers().stream()
-                .filter(p -> p.getWorld().getEnvironment() == World.Environment.NORMAL)
-                .map(Player::getWorld)
-                .findFirst()
-                .orElse(Bukkit.getWorld("world"));
+            .filter(p -> p.getWorld().getEnvironment() == World.Environment.NORMAL)
+            .map(Player::getWorld)
+            .findFirst()
+            .orElse(Bukkit.getWorld("world"));
 
         if (world == null) {
             logger.warning("No normal world found for storm event.");
@@ -51,70 +100,149 @@ public final class StormEvent extends AbstractSkyEvent {
             return;
         }
 
+        notificationService.notifyEventPhase(this, "start");
+        soundService.playGlobal("storm_start");
+    }
+
+    private void startTransition() {
+        if (world == null) return;
+
         wasStorming = world.hasStorm();
         wasThundering = world.isThundering();
+
+        notificationService.notifyEventPhase(this, "transition");
+        soundService.play("storm_tick", world.getSpawnLocation(), getNearbyPlayers(world.getSpawnLocation(), 48));
+
+        stormTask = FoliaScheduler.runGlobalTimer(plugin, () -> {
+            if (world == null) return;
+            List<Player> audience = getNearbyPlayers(world.getSpawnLocation(), 48);
+            if (!audience.isEmpty()) {
+                CloudShape cloud = new CloudShape(20, 3, 12);
+                Location loc = world.getSpawnLocation();
+                cloud.spawn(loc, Particle.CLOUD, 10, 0.01, audience);
+            }
+        }, 20L, 10L);
+
+        FoliaScheduler.runGlobalDelayed(plugin, () -> {
+            if (getStatus() == SkyEventStatus.WARNING) {
+                SkyEventManager em = (SkyEventManager) plugin.getServer().getPluginManager().getPlugin("SkySignals");
+                em.transitionPhase(this, SkyEventPhase.ACTIVE);
+            }
+        }, 200L);
+    }
+
+    private void startStorm() {
+        if (world == null) return;
 
         world.setStorm(true);
         world.setThundering(true);
         world.setWeatherDuration(999999);
 
-        notificationService.notifyEventStart(this);
+        notificationService.notifyEventPhase(this, "active");
+        soundService.playGlobal("storm_active");
 
-        stormTask = FoliaScheduler.runGlobalTimer(plugin, new Runnable() {
-            private int tick = 0;
+        lightningTask = FoliaScheduler.runGlobalTimer(plugin, () -> {
+            if (world == null) return;
 
-            @Override
-            public void run() {
-                if (world == null) {
-                    return;
-                }
-                tick++;
-                if (tick % 100 == 0) {
-                    Player target = Bukkit.getOnlinePlayers().stream()
-                            .filter(p -> p.getWorld().equals(world))
-                            .findFirst()
-                            .orElse(null);
-                    if (target != null) {
-                        org.bukkit.Location loc = target.getLocation();
-                        FoliaScheduler.runRegion(plugin, loc, () -> {
-                            world.strikeLightningEffect(loc);
-                            for (Player p : Bukkit.getOnlinePlayers()) {
-                                if (p.getWorld().equals(world)) {
-                                    p.playSound(p.getLocation(), org.bukkit.Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f);
-                                }
-                            }
-                        });
+            List<Player> players = world.getPlayers();
+            if (players.isEmpty()) return;
+
+            Player target = players.get(random.nextInt(players.size()));
+            Location loc = target.getLocation().add(
+                random.nextInt(20) - 10, 0, random.nextInt(20) - 10
+            );
+            loc.setY(world.getHighestBlockYAt(loc));
+
+            FoliaScheduler.runRegion(plugin, loc, () -> {
+                world.strikeLightningEffect(loc);
+                for (Player p : players) {
+                    if (p.getWorld().equals(world)) {
+                        p.playSound(p.getLocation(), Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f);
                     }
                 }
-            }
-        }, 20L, 5L);
+            });
+
+            lightningCounter.incrementAndGet();
+        }, 100L, 40L);
 
         logger.info("Storm event started on world " + world.getName());
     }
 
-    @Override
-    public void tick() {
+    private void startDissipation() {
+        if (world == null) return;
+
+        if (lightningTask != null) lightningTask.cancel();
+
+        lightningTask = FoliaScheduler.runGlobalTimer(plugin, () -> {
+            if (world == null) return;
+            List<Player> players = world.getPlayers();
+            if (players.isEmpty()) return;
+
+            Player target = players.get(random.nextInt(players.size()));
+            Location loc = target.getLocation().add(
+                random.nextInt(30) - 15, 0, random.nextInt(30) - 15
+            );
+            loc.setY(world.getHighestBlockYAt(loc));
+
+            FoliaScheduler.runRegion(plugin, loc, () -> {
+                world.strikeLightningEffect(loc);
+            });
+        }, 200L, 100L);
+
+        notificationService.notifyEventPhase(this, "finish");
+        soundService.playGlobal("storm_finish");
+
+        FoliaScheduler.runGlobalDelayed(plugin, this::restoreWeather, 200L);
     }
 
-    @Override
-    public void stop() {
-        if (stormTask != null) {
-            stormTask.cancel();
-        }
+    private void restoreWeather() {
+        if (stormTask != null) stormTask.cancel();
+        if (lightningTask != null) lightningTask.cancel();
+
         if (world != null) {
             FoliaScheduler.runGlobal(plugin, () -> {
                 world.setStorm(wasStorming);
                 world.setThundering(wasThundering);
                 logger.info("Storm event stopped, weather restored.");
             });
-        } else {
-            logger.info("Storm event stopped, weather restored.");
         }
+    }
+
+    private List<Player> getNearbyPlayers(Location center, double radius) {
+        if (center == null || center.getWorld() == null) return List.of();
+        double radiusSq = radius * radius;
+        List<Player> result = new ArrayList<>();
+        for (Player player : center.getWorld().getPlayers()) {
+            if (player.getLocation().distanceSquared(center) <= radiusSq) {
+                result.add(player);
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public void tick(long elapsedSeconds) {
+        super.tick(elapsedSeconds);
+    }
+
+    @Override
+    public void stop() {
+        restoreWeather();
     }
 
     @Override
     public void cancel() {
         super.cancel();
         stop();
+    }
+
+    @Override
+    protected Map<String, Object> getExtraData() {
+        return Map.of(
+            "world", world != null ? world.getName() : "none",
+            "lightningStrikes", lightningCounter.get(),
+            "wasStorming", wasStorming,
+            "wasThundering", wasThundering
+        );
     }
 }

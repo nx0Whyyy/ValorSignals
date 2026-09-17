@@ -1,6 +1,5 @@
 package com.valorsky.skysignals.reward;
 
-import org.bukkit.Material;
 import org.bukkit.configuration.serialization.ConfigurationSerializable;
 
 import java.util.LinkedHashMap;
@@ -35,36 +34,6 @@ public final class Reward {
 
     public List<ItemReward> getItems() {
         return items;
-    }
-
-    public static final class ItemReward {
-        private final Material material;
-        private final int amount;
-        private final String name;
-        private final List<String> lore;
-
-        public ItemReward(Material material, int amount, String name, List<String> lore) {
-            this.material = material;
-            this.amount = amount;
-            this.name = name;
-            this.lore = lore;
-        }
-
-        public Material getMaterial() {
-            return material;
-        }
-
-        public int getAmount() {
-            return amount;
-        }
-
-        public String getName() {
-            return name;
-        }
-
-        public List<String> getLore() {
-            return lore;
-        }
     }
 
     public Map<String, Object> serialize() {

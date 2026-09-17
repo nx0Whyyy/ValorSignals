@@ -60,23 +60,27 @@ public final class RedisService {
             logger.info("Redis disabled in configuration.");
             return;
         }
-        try {
-            RedisURI uri = RedisURI.create(config.redisUri());
-            if (!config.redisPassword().isEmpty()) {
-                uri.setPassword(config.redisPassword().toCharArray());
-            }
-            client = RedisClient.create(uri);
-            connection = client.connect();
-            sync = connection.sync();
-            async = connection.async();
-            connected.set(true);
-            logger.info("Connected to Redis.");
-            startPubSub();
-        } catch (Exception e) {
-            logger.warning("Failed to connect to Redis: " + e.getMessage() + ". Will retry in background.");
-            connected.set(false);
-            scheduleReconnect();
-        }
+         try {
+             RedisURI uri = RedisURI.create(config.redisUri());
+             if (!config.redisPassword().isEmpty()) {
+                 uri.setPassword(config.redisPassword().toCharArray());
+             }
+             client = RedisClient.create(uri);
+             connection = client.connect();
+             sync = connection.sync();
+             async = connection.async();
+             connected.set(true);
+             logger.info("Connected to Redis.");
+             startPubSub();
+         } catch (Exception e) {
+             logger.warning("Failed to connect to Redis: " + e.getMessage() + ". Will retry in background.");
+             client = null;
+             connection = null;
+             sync = null;
+             async = null;
+             connected.set(false);
+             scheduleReconnect();
+         }
     }
 
     private void startPubSub() {
@@ -256,6 +260,10 @@ public final class RedisService {
         if (client != null) client.shutdown();
         listeners.clear();
         logger.info("Redis disconnected.");
+    }
+
+    public RedisClient getClient() {
+        return client;
     }
 
     @FunctionalInterface

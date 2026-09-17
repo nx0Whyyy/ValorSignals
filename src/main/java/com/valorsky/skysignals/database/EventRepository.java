@@ -3,6 +3,10 @@ package com.valorsky.skysignals.database;
 import com.valorsky.skysignals.model.EventState;
 import com.valorsky.skysignals.model.SkyEventStatus;
 import com.valorsky.skysignals.model.SkyEventType;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.valorsky.skysignals.redis.EnumAdapter;
+import com.valorsky.skysignals.redis.InstantAdapter;
 
 import javax.sql.DataSource;
 import java.sql.*;
@@ -16,24 +20,34 @@ public final class EventRepository {
 
     private final DataSource dataSource;
     private final Logger logger;
+    private final Gson gson;
 
     public EventRepository(DataSource dataSource, Logger logger) {
         this.dataSource = dataSource;
         this.logger = logger;
+        this.gson = new GsonBuilder()
+            .registerTypeAdapter(Instant.class, new InstantAdapter())
+            .registerTypeAdapter(SkyEventType.class, new EnumAdapter<>(SkyEventType.class))
+            .registerTypeAdapter(SkyEventStatus.class, new EnumAdapter<>(SkyEventStatus.class))
+            .create();
     }
 
     public void saveEventState(EventState state) {
         if (dataSource == null) return;
         try (Connection conn = dataSource.getConnection()) {
-            String sql = "INSERT INTO sky_signals_events (event_id, type, server, started_at, ended_at, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
+            String sql = "INSERT INTO sky_signals_events (event_id, type, server, scope, scheduled_at, started_at, ended_at, status, phase, elapsed_seconds, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, state.id().toString());
                 stmt.setString(2, state.type().name());
                 stmt.setString(3, state.serverId());
-                stmt.setTimestamp(4, Timestamp.from(state.startedAt()));
-                stmt.setTimestamp(5, Timestamp.from(state.endsAt()));
-                stmt.setString(6, state.status().name());
-                stmt.setTimestamp(7, Timestamp.from(Instant.now()));
+                stmt.setString(4, state.scope().name());
+                stmt.setTimestamp(5, Timestamp.from(state.scheduledAt()));
+                stmt.setTimestamp(6, Timestamp.from(state.startedAt()));
+                stmt.setTimestamp(7, state.endsAt() != null ? Timestamp.from(state.endsAt()) : null);
+                stmt.setString(8, state.status().name());
+                stmt.setString(9, state.phase().name());
+                stmt.setLong(10, state.elapsedSeconds());
+                stmt.setString(11, gson.toJson(state.data()));
                 stmt.executeUpdate();
             }
         } catch (SQLException e) {
@@ -44,11 +58,12 @@ public final class EventRepository {
     public void updateEventStatus(UUID eventId, SkyEventStatus status, Instant timestamp) {
         if (dataSource == null) return;
         try (Connection conn = dataSource.getConnection()) {
-            String sql = "UPDATE sky_signals_events SET status = ?, ended_at = ? WHERE event_id = ?";
+            String sql = "UPDATE sky_signals_events SET status = ?, phase = ?, ended_at = ? WHERE event_id = ?";
             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, status.name());
-                stmt.setTimestamp(2, Timestamp.from(timestamp));
-                stmt.setString(3, eventId.toString());
+                stmt.setString(2, statusToPhase(status).name());
+                stmt.setTimestamp(3, Timestamp.from(timestamp));
+                stmt.setString(4, eventId.toString());
                 stmt.executeUpdate();
             }
         } catch (SQLException e) {
@@ -56,10 +71,23 @@ public final class EventRepository {
         }
     }
 
+    private com.valorsky.skysignals.model.SkyEventPhase statusToPhase(SkyEventStatus status) {
+        return switch (status) {
+            case SCHEDULED -> com.valorsky.skysignals.model.SkyEventPhase.SCHEDULED;
+            case ANNOUNCING -> com.valorsky.skysignals.model.SkyEventPhase.ANNOUNCING;
+            case WARNING -> com.valorsky.skysignals.model.SkyEventPhase.WARNING;
+            case ACTIVE -> com.valorsky.skysignals.model.SkyEventPhase.ACTIVE;
+            case COMPLETING -> com.valorsky.skysignals.model.SkyEventPhase.COMPLETING;
+            case FINISHED -> com.valorsky.skysignals.model.SkyEventPhase.FINISHED;
+            case CANCELLED -> com.valorsky.skysignals.model.SkyEventPhase.CANCELLED;
+        };
+    }
+
     public void recordParticipation(UUID eventId, UUID playerId, int contribution, boolean rewarded) {
         if (dataSource == null) return;
         try (Connection conn = dataSource.getConnection()) {
-            String sql = "INSERT INTO sky_signals_participation (event_id, uuid, contribution, rewarded, created_at) VALUES (?, ?, ?, ?, ?)";
+            String sql = "INSERT INTO sky_signals_participation (event_id, uuid, contribution, rewarded, created_at) VALUES (?, ?, ?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE contribution = VALUES(contribution), rewarded = VALUES(rewarded)";
             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, eventId.toString());
                 stmt.setString(2, playerId.toString());
@@ -87,6 +115,40 @@ public final class EventRepository {
         } catch (SQLException e) {
             logger.warning("Failed to check reward status: " + e.getMessage());
             return false;
+        }
+    }
+
+    public boolean hasBeenClaimed(String claimKey) {
+        if (dataSource == null) return false;
+        try (Connection conn = dataSource.getConnection()) {
+            String sql = "SELECT 1 FROM sky_signals_rewards WHERE claim_key = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, claimKey);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    return rs.next();
+                }
+            }
+        } catch (SQLException e) {
+            logger.warning("Failed to check reward claim: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public void recordClaim(String claimKey, UUID eventId, UUID playerId, String eventType, String rewardType, String rewardData) {
+        if (dataSource == null) return;
+        try (Connection conn = dataSource.getConnection()) {
+            String sql = "INSERT IGNORE INTO sky_signals_rewards (claim_key, event_id, player_uuid, event_type, reward_type, reward_data) VALUES (?, ?, ?, ?, ?, ?)";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, claimKey);
+                stmt.setString(2, eventId.toString());
+                stmt.setString(3, playerId.toString());
+                stmt.setString(4, eventType);
+                stmt.setString(5, rewardType);
+                stmt.setString(6, rewardData);
+                stmt.executeUpdate();
+            }
+        } catch (SQLException e) {
+            logger.warning("Failed to record reward claim: " + e.getMessage());
         }
     }
 
