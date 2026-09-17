@@ -5,6 +5,7 @@ import com.valorsky.skysignals.model.EventState;
 import com.valorsky.skysignals.model.SkyEventStatus;
 import com.valorsky.skysignals.notification.NotificationService;
 import com.valorsky.skysignals.util.PositionUtils;
+import com.valorsky.skysignals.util.FoliaScheduler;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -17,8 +18,6 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitRunnable;
-import org.bukkit.scheduler.BukkitTask;
 
 import java.util.HashSet;
 import java.util.Random;
@@ -31,7 +30,7 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
     private final NotificationService notificationService;
     private final Logger logger;
     private final Set<Entity> spawnedMobs = new HashSet<>();
-    private transient BukkitTask waveTask;
+    private transient boolean waveScheduled = false;
     private int currentWave = 0;
     private int maxWaves;
     private Location center;
@@ -79,7 +78,7 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
 
         notificationService.notifyEventStart(this);
 
-        spawnWave();
+        FoliaScheduler.runRegion(plugin, center, this::spawnWave);
     }
 
     private void spawnWave() {
@@ -111,14 +110,12 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
             }
         }
 
-        waveTask = new BukkitRunnable() {
-            @Override
-            public void run() {
-                if (currentWave < maxWaves) {
-                    spawnWave();
-                }
+        FoliaScheduler.runRegionDelayed(plugin, center, () -> {
+            if (waveScheduled && currentWave < maxWaves) {
+                spawnWave();
             }
-        }.runTaskLater(plugin, 300L);
+        }, 300L);
+        waveScheduled = true;
     }
 
     private void spawnMob(EntityType type, Random random) {
@@ -142,7 +139,7 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
 
     @Override
     public void stop() {
-        if (waveTask != null) waveTask.cancel();
+        waveScheduled = false;
         for (Entity entity : spawnedMobs) {
             if (entity instanceof LivingEntity) {
                 entity.remove();

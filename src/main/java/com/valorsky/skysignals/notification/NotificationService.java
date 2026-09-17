@@ -15,7 +15,9 @@ import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
+
+import com.valorsky.skysignals.util.FoliaScheduler;
+import com.valorsky.skysignals.util.FoliaScheduler.TaskHandle;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -30,7 +32,7 @@ public final class NotificationService {
     private final Logger logger;
     private final MiniMessage miniMessage;
     private final Map<UUID, BossBar> bossBars = new HashMap<>();
-    private final Map<UUID, BukkitTask> bossBarTasks = new HashMap<>();
+    private final Map<UUID, TaskHandle> bossBarTasks = new HashMap<>();
 
     public NotificationService(JavaPlugin plugin, Config config, MessageConfig messages) {
         this.plugin = plugin;
@@ -53,18 +55,20 @@ public final class NotificationService {
         );
 
         for (Player player : Bukkit.getOnlinePlayers()) {
-            if (config.notificationsChat()) {
-                player.sendMessage(component);
-            }
-            if (config.notificationsActionbar()) {
-                player.sendActionBar(Component.text(event.getType().symbol() + " " + event.getType().displayName()));
-            }
-            if (config.notificationsSound()) {
-                player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 1.0f, 1.0f);
-            }
-            if (config.notificationsParticles()) {
-                player.getWorld().spawnParticle(Particle.HAPPY_VILLAGER, player.getLocation(), 10);
-            }
+            FoliaScheduler.runEntity(plugin, player, () -> {
+                if (config.notificationsChat()) {
+                    player.sendMessage(component);
+                }
+                if (config.notificationsActionbar()) {
+                    player.sendActionBar(Component.text(event.getType().symbol() + " " + event.getType().displayName()));
+                }
+                if (config.notificationsSound()) {
+                    player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 1.0f, 1.0f);
+                }
+                if (config.notificationsParticles()) {
+                    player.getWorld().spawnParticle(Particle.HAPPY_VILLAGER, player.getLocation(), 10);
+                }
+            });
         }
 
         createBossBar(event);
@@ -82,9 +86,11 @@ public final class NotificationService {
         );
 
         for (Player player : Bukkit.getOnlinePlayers()) {
-            if (config.notificationsChat()) {
-                player.sendMessage(component);
-            }
+            FoliaScheduler.runEntity(plugin, player, () -> {
+                if (config.notificationsChat()) {
+                    player.sendMessage(component);
+                }
+            });
         }
 
         removeBossBar(event.getId());
@@ -103,10 +109,10 @@ public final class NotificationService {
 
         bossBars.put(event.getId(), bar);
         for (Player player : Bukkit.getOnlinePlayers()) {
-            bar.addPlayer(player);
+            FoliaScheduler.runEntity(plugin, player, () -> bar.addPlayer(player));
         }
 
-        BukkitTask task = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+        TaskHandle task = FoliaScheduler.runGlobalTimer(plugin, () -> {
             BossBar existing = bossBars.get(event.getId());
             if (existing != null) {
                 updateBossBar(event, existing);
@@ -126,7 +132,7 @@ public final class NotificationService {
     }
 
     private void removeBossBar(UUID eventId) {
-        BukkitTask task = bossBarTasks.remove(eventId);
+        TaskHandle task = bossBarTasks.remove(eventId);
         if (task != null) {
             task.cancel();
         }
@@ -134,7 +140,7 @@ public final class NotificationService {
         if (bar != null) {
             bar.setVisible(false);
             for (Player player : Bukkit.getOnlinePlayers()) {
-                bar.removePlayer(player);
+                FoliaScheduler.runEntity(plugin, player, () -> bar.removePlayer(player));
             }
         }
     }
@@ -146,7 +152,7 @@ public final class NotificationService {
     }
 
     public void cleanup() {
-        for (BukkitTask task : bossBarTasks.values()) {
+        for (TaskHandle task : bossBarTasks.values()) {
             task.cancel();
         }
         bossBarTasks.clear();

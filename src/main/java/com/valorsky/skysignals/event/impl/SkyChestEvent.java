@@ -6,6 +6,7 @@ import com.valorsky.skysignals.model.SkyEventStatus;
 import com.valorsky.skysignals.model.SkyEventType;
 import com.valorsky.skysignals.notification.NotificationService;
 import com.valorsky.skysignals.reward.RewardService;
+import com.valorsky.skysignals.util.FoliaScheduler;
 import com.valorsky.skysignals.util.PositionUtils;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -65,15 +66,17 @@ public final class SkyChestEvent extends AbstractSkyEvent {
             return;
         }
 
-        Block block = chestLoc.getBlock();
-        block.setType(Material.CHEST);
-        chestBlock = block;
+        FoliaScheduler.runRegion(plugin, chestLoc, () -> {
+            Block block = chestLoc.getBlock();
+            block.setType(Material.CHEST);
+            chestBlock = block;
 
-        populateChest(block);
+            populateChest(block);
 
-        notificationService.notifyEventStart(this);
-        logger.info("Sky Chest spawned at " + chestLoc.getWorld().getName() +
-                " " + chestLoc.getBlockX() + ", " + chestLoc.getBlockY() + ", " + chestLoc.getBlockZ());
+            notificationService.notifyEventStart(this);
+            logger.info("Sky Chest spawned at " + chestLoc.getWorld().getName() +
+                    " " + chestLoc.getBlockX() + ", " + chestLoc.getBlockY() + ", " + chestLoc.getBlockZ());
+        });
     }
 
     private Location findChestPosition(World world) {
@@ -133,9 +136,13 @@ public final class SkyChestEvent extends AbstractSkyEvent {
 
     @Override
     public void stop() {
-        if (chestBlock != null && chestBlock.getType() == Material.CHEST) {
-            chestBlock.getWorld().dropItemNaturally(chestBlock.getLocation(), new ItemStack(Material.CHEST));
-            chestBlock.setType(Material.AIR);
+        if (chestBlock != null && chestBlock.getLocation().getWorld() != null) {
+            FoliaScheduler.runRegion(plugin, chestBlock.getLocation(), () -> {
+                if (chestBlock.getType() == Material.CHEST) {
+                    chestBlock.getWorld().dropItemNaturally(chestBlock.getLocation(), new ItemStack(Material.CHEST));
+                    chestBlock.setType(Material.AIR);
+                }
+            });
         }
     }
 

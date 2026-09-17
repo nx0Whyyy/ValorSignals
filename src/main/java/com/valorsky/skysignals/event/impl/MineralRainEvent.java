@@ -5,6 +5,8 @@ import com.valorsky.skysignals.model.EventState;
 import com.valorsky.skysignals.model.SkyEventStatus;
 import com.valorsky.skysignals.notification.NotificationService;
 import com.valorsky.skysignals.util.PositionUtils;
+import com.valorsky.skysignals.util.FoliaScheduler;
+import com.valorsky.skysignals.util.FoliaScheduler.TaskHandle;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -15,7 +17,6 @@ import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
@@ -25,7 +26,7 @@ public final class MineralRainEvent extends AbstractSkyEvent {
 
     private final NotificationService notificationService;
     private final Logger logger;
-    private transient BukkitTask rainTask;
+    private transient TaskHandle rainTask;
     private Location center;
     private World world;
     private List<DropEntry> weightedDrops;
@@ -68,12 +69,9 @@ public final class MineralRainEvent extends AbstractSkyEvent {
 
         notificationService.notifyEventStart(this);
 
-        rainTask = new BukkitRunnable() {
-            @Override
-            public void run() {
-                dropMineral();
-            }
-        }.runTaskTimer(plugin, 10L, 5L);
+        rainTask = FoliaScheduler.runRegionTimer(plugin, center, () -> {
+            dropMineral();
+        }, 10L, 5L);
 
         logger.info("Mineral rain started at " + center.getWorld().getName());
     }
@@ -142,7 +140,9 @@ public final class MineralRainEvent extends AbstractSkyEvent {
 
     @Override
     public void stop() {
-        if (rainTask != null) rainTask.cancel();
+        if (rainTask != null) {
+            rainTask.cancel();
+        }
     }
 
     @Override

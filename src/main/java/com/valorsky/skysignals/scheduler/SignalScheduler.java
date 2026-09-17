@@ -3,9 +3,8 @@ package com.valorsky.skysignals.scheduler;
 import com.valorsky.skysignals.config.Config;
 import com.valorsky.skysignals.event.SkyEventManager;
 import com.valorsky.skysignals.model.SkyEventType;
-import org.bukkit.Bukkit;
+import com.valorsky.skysignals.util.FoliaScheduler;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
 
 import java.util.List;
 import java.util.Random;
@@ -18,7 +17,6 @@ public final class SignalScheduler {
     private final Config config;
     private final SkyEventManager eventManager;
     private final Logger logger;
-    private BukkitTask schedulerTask;
     private boolean scheduled = false;
 
     public SignalScheduler(JavaPlugin plugin, Config config, SkyEventManager eventManager) {
@@ -44,7 +42,7 @@ public final class SignalScheduler {
         int maxInterval = config.schedulerMaxInterval();
         int delay = minInterval + (int) (Math.random() * (maxInterval - minInterval + 1));
 
-        schedulerTask = Bukkit.getScheduler().runTaskLater(plugin, this::triggerRandomEvent, delay * 20L);
+        FoliaScheduler.runGlobalDelayed(plugin, this::triggerRandomEvent, delay * 20L);
         scheduled = true;
         logger.info("Next SkySignal in " + delay + " seconds.");
     }
@@ -73,9 +71,6 @@ public final class SignalScheduler {
     }
 
     public void stop() {
-        if (schedulerTask != null) {
-            schedulerTask.cancel();
-        }
         scheduled = false;
     }
 

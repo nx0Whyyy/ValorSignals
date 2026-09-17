@@ -2,6 +2,7 @@ package com.valorsky.skysignals.reward;
 
 import com.valorsky.skysignals.config.Config;
 import com.valorsky.skysignals.model.SkyEventType;
+import com.valorsky.skysignals.util.FoliaScheduler;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -40,9 +41,11 @@ public final class RewardService {
 
         Reward reward = buildReward(eventType);
 
-        giveMoney(player, reward);
-        runCommands(player, reward, eventType);
-        giveItems(player, reward);
+        FoliaScheduler.runEntity(plugin, player, () -> {
+            giveMoney(player, reward);
+            runCommands(player, reward, eventType);
+            giveItems(player, reward);
+        });
     }
 
     private Reward buildReward(SkyEventType eventType) {

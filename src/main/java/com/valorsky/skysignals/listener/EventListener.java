@@ -17,6 +17,8 @@ import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import com.valorsky.skysignals.util.FoliaScheduler;
+
 import java.util.UUID;
 
 public final class EventListener implements Listener {
@@ -49,7 +51,7 @@ public final class EventListener implements Listener {
                         return;
                     }
 
-                    plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+                    FoliaScheduler.runRegionDelayed(plugin, event.getClickedBlock().getLocation(), () -> {
                         if (chestEvent.getChestBlock() != null) {
                             chestEvent.getChestBlock().setType(Material.AIR);
                         }

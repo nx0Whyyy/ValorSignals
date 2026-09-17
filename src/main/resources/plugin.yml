@@ -2,8 +2,7 @@ name: ValorSky-SkySignals
 version: 1.0.1
 main: com.valorsky.skysignals.SkySignalsPlugin
 api-version: '1.21'
-foliation-supported: true
-foliated: true
+folia-supported: true
 author: ValorSky
 description: Dynamic celestial events for ValorSky
 softdepend: [PlaceholderAPI]

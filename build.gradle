@@ -93,6 +93,7 @@ shadowJar {
     relocate 'com.zaxxer.hikari', 'com.valorsky.shaded.hikari'
     relocate 'com.google.gson', 'com.valorsky.shaded.gson'
     mergeServiceFiles()
+    exclude 'META-INF/maven/**'
 }
 
 build.finalizedBy(shadowJar)

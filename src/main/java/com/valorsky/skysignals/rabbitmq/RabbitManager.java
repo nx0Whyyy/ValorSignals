@@ -20,6 +20,7 @@ public final class RabbitManager {
     private Channel channel;
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private volatile boolean reconnecting = false;
+    private volatile boolean shutdown = false;
     private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "SkySignals-Rabbit-Admin");
         t.setDaemon(true);
@@ -32,6 +33,7 @@ public final class RabbitManager {
     }
 
     public void connect() {
+        if (shutdown) return;
         if (!config.rabbitEnabled()) {
             logger.info("RabbitMQ disabled in configuration.");
             return;
@@ -61,13 +63,14 @@ public final class RabbitManager {
     }
 
     private void scheduleReconnect() {
-        if (reconnecting) return;
+        if (reconnecting || shutdown) return;
         reconnecting = true;
 
         Thread t = new Thread(() -> {
-            while (!connected.get()) {
+            while (!connected.get() && !shutdown) {
                 try {
                     Thread.sleep(5000);
+                    if (shutdown) break;
                     ConnectionFactory factory = new ConnectionFactory();
                     factory.setHost(config.rabbitHost());
                     factory.setPort(config.rabbitPort());
@@ -84,6 +87,7 @@ public final class RabbitManager {
                     logger.info("Reconnected to RabbitMQ.");
                     break;
                 } catch (Exception e) {
+                    if (shutdown) break;
                     logger.warning("RabbitMQ reconnection failed, retrying in 5s: " + e.getMessage());
                 }
             }
@@ -107,6 +111,7 @@ public final class RabbitManager {
     }
 
     public void disconnect() {
+        shutdown = true;
         connected.set(false);
         reconnecting = false;
         try {

@@ -4,6 +4,7 @@ import com.valorsky.skysignals.event.AbstractSkyEvent;
 import com.valorsky.skysignals.model.EventState;
 import com.valorsky.skysignals.model.SkyEventStatus;
 import com.valorsky.skysignals.notification.NotificationService;
+import com.valorsky.skysignals.util.FoliaScheduler;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -46,7 +47,7 @@ public final class GrowthBoostEvent extends AbstractSkyEvent {
         tickCounter++;
         if (tickCounter % 40 == 0) {
             for (Player player : Bukkit.getOnlinePlayers()) {
-                boostNearbyCrops(player);
+                FoliaScheduler.runEntity(plugin, player, () -> boostNearbyCrops(player));
             }
         }
     }

@@ -6,12 +6,13 @@ import com.valorsky.skysignals.model.SkyEventStatus;
 import com.valorsky.skysignals.model.SkyEventType;
 import com.valorsky.skysignals.notification.NotificationService;
 import com.valorsky.skysignals.reward.RewardService;
+import com.valorsky.skysignals.util.FoliaScheduler;
+import com.valorsky.skysignals.util.FoliaScheduler.TaskHandle;
 import com.valorsky.skysignals.util.PositionUtils;
 import org.bukkit.*;
 import org.bukkit.entity.FallingBlock;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
 
@@ -30,7 +31,7 @@ public final class MeteorEvent extends AbstractSkyEvent {
     private Location meteorStart;
     private Location meteorTarget;
     private transient FallingBlock meteorBlock;
-    private transient BukkitTask meteorTask;
+    private transient TaskHandle meteorTask;
     private boolean hasLanded = false;
     private final Set<UUID> notifiedPlayers = new HashSet<>();
     private final Set<UUID> rewardedPlayers = new HashSet<>();
@@ -60,37 +61,37 @@ public final class MeteorEvent extends AbstractSkyEvent {
             return;
         }
 
-        meteorStart = meteorTarget.clone().add(0, 80, 0);
-        meteorBlock = world.spawnFallingBlock(
-                meteorStart,
-                Material.OBSIDIAN.createBlockData()
-        );
-        meteorBlock.setDropItem(false);
+        FoliaScheduler.runRegion(plugin, meteorTarget, () -> {
+            meteorStart = meteorTarget.clone().add(0, 80, 0);
+            meteorBlock = meteorStart.getWorld().spawnFallingBlock(
+                    meteorStart,
+                    Material.OBSIDIAN.createBlockData()
+            );
+            meteorBlock.setDropItem(false);
 
-        Vector velocity = meteorTarget.toVector().subtract(meteorStart.toVector()).normalize().multiply(1.5);
-        meteorBlock.setVelocity(velocity);
+            Vector velocity = meteorTarget.toVector().subtract(meteorStart.toVector()).normalize().multiply(1.5);
+            meteorBlock.setVelocity(velocity);
 
-        notifyDirection();
+            notifyDirection();
 
-        meteorTask = new BukkitRunnable() {
-            @Override
-            public void run() {
-                if (meteorBlock == null || !meteorBlock.isValid()) {
-                    handleImpact();
-                    cancel();
-                    return;
+            meteorTask = FoliaScheduler.runRegionTimer(plugin, meteorStart, new Runnable() {
+                @Override
+                public void run() {
+                    if (meteorBlock == null || !meteorBlock.isValid()) {
+                        handleImpact();
+                        return;
+                    }
+                    Location loc = meteorBlock.getLocation();
+                    loc.getWorld().spawnParticle(Particle.FLAME, loc, 5, 0.2, 0.2, 0.2, 0.01);
+
+                    if (loc.distance(meteorTarget) < 2.0 || isOnGround(loc)) {
+                        handleImpact();
+                    }
                 }
-                Location loc = meteorBlock.getLocation();
-                loc.getWorld().spawnParticle(Particle.FLAME, loc, 5, 0.2, 0.2, 0.2, 0.01);
+            }, 5L, 2L);
 
-                if (loc.distance(meteorTarget) < 2.0 || isOnGround(loc)) {
-                    handleImpact();
-                    cancel();
-                }
-            }
-        }.runTaskTimer(plugin, 5L, 2L);
-
-        logger.info("Meteor event started at " + meteorStart.getWorld().getName());
+            logger.info("Meteor event started at " + meteorStart.getWorld().getName());
+        });
     }
 
     private void notifyDirection() {

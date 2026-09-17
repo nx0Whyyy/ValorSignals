@@ -3,6 +3,7 @@ package com.valorsky.skysignals.rabbitmq;
 import com.valorsky.skysignals.config.Config;
 import com.valorsky.skysignals.event.SkyEventManager;
 import com.valorsky.skysignals.model.EventState;
+import com.valorsky.skysignals.util.FoliaScheduler;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.rabbitmq.client.AMQP;
@@ -22,12 +23,14 @@ public final class EventConsumer {
     private final Logger logger;
     private final Gson gson;
     private final SkyEventManager eventManager;
+    private final org.bukkit.plugin.java.JavaPlugin plugin;
 
-    public EventConsumer(RabbitManager rabbitManager, Config config, Logger logger, SkyEventManager eventManager) {
+    public EventConsumer(RabbitManager rabbitManager, Config config, Logger logger, SkyEventManager eventManager, org.bukkit.plugin.java.JavaPlugin plugin) {
         this.rabbitManager = rabbitManager;
         this.config = config;
         this.logger = logger;
         this.eventManager = eventManager;
+        this.plugin = plugin;
         this.gson = new GsonBuilder()
                 .registerTypeAdapter(Instant.class, new com.valorsky.skysignals.redis.InstantAdapter())
                 .registerTypeAdapter(com.valorsky.skysignals.model.SkyEventType.class, new com.valorsky.skysignals.redis.EnumAdapter<>(com.valorsky.skysignals.model.SkyEventType.class))
@@ -53,7 +56,8 @@ public final class EventConsumer {
 
                     try {
                         EventState state = gson.fromJson(message, EventState.class);
-                        handleMessage(routingKey, state);
+                        // Dispatch to Folia global scheduler for thread-safe event handling
+                        FoliaScheduler.runGlobal(plugin, () -> handleMessage(routingKey, state));
                     } catch (Exception e) {
                         logger.warning("Failed to process RabbitMQ message: " + e.getMessage());
                     } finally {

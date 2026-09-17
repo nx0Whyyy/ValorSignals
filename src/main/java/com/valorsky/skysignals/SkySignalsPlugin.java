@@ -20,6 +20,7 @@ import com.valorsky.skysignals.rabbitmq.RabbitManager;
 import com.valorsky.skysignals.redis.RedisService;
 import com.valorsky.skysignals.reward.RewardService;
 import com.valorsky.skysignals.scheduler.SignalScheduler;
+import com.valorsky.skysignals.util.FoliaScheduler;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class SkySignalsPlugin extends JavaPlugin {
@@ -77,7 +78,7 @@ public final class SkySignalsPlugin extends JavaPlugin {
                 notificationService, config
         );
 
-        eventConsumer = new EventConsumer(rabbitManager, config, getLogger(), eventManager);
+        eventConsumer = new EventConsumer(rabbitManager, config, getLogger(), eventManager, this);
 
         eventManager.initialize();
 
@@ -85,7 +86,7 @@ public final class SkySignalsPlugin extends JavaPlugin {
             redisService.addListener(new RedisService.RedisEventListener() {
                 @Override
                 public void onEventPublished(com.valorsky.skysignals.model.EventState state) {
-                    getServer().getScheduler().runTask(SkySignalsPlugin.this, () -> {
+                    FoliaScheduler.runGlobal(SkySignalsPlugin.this, () -> {
                         switch (state.status()) {
                             case ACTIVE -> eventManager.handleEventStarted(state);
                             case FINISHED, CANCELLED -> eventManager.handleEventFinished(state);

@@ -42,6 +42,7 @@ public final class RedisService {
     private final String prefix = "skysignals:";
     private final List<RedisEventListener> listeners = new ArrayList<>();
     private volatile boolean reconnecting = false;
+    private volatile boolean shutdown = false;
 
     public RedisService(Config config, Logger logger) {
         this.config = config;
@@ -54,6 +55,7 @@ public final class RedisService {
     }
 
     public void connect() {
+        if (shutdown) return;
         if (!config.redisEnabled()) {
             logger.info("Redis disabled in configuration.");
             return;
@@ -128,8 +130,7 @@ public final class RedisService {
     }
 
     public void storeEventState(EventState state) {
-        if (!connected.get()) {
-            logger.warning("Redis not connected, cannot store event state.");
+        if (!connected.get() || shutdown) {
             return;
         }
         asyncExecutor.execute(() -> {
@@ -159,7 +160,7 @@ public final class RedisService {
     }
 
     public void removeEventState(String eventId) {
-        if (!connected.get()) return;
+        if (!connected.get() || shutdown) return;
         asyncExecutor.execute(() -> {
             try {
                 async.del(prefix + "event:" + eventId);
@@ -211,13 +212,14 @@ public final class RedisService {
     }
 
     private void scheduleReconnect() {
-        if (reconnecting) return;
+        if (reconnecting || shutdown) return;
         reconnecting = true;
 
         Thread t = new Thread(() -> {
-            while (!connected.get()) {
+            while (!connected.get() && !shutdown) {
                 try {
                     Thread.sleep(5000);
+                    if (shutdown) break;
                     RedisURI uri = RedisURI.create(config.redisUri());
                     if (!config.redisPassword().isEmpty()) {
                         uri.setPassword(config.redisPassword().toCharArray());
@@ -231,6 +233,7 @@ public final class RedisService {
                     startPubSub();
                     break;
                 } catch (Exception e) {
+                    if (shutdown) break;
                     logger.warning("Redis reconnection failed, retrying in 5s: " + e.getMessage());
                 }
             }
@@ -242,6 +245,7 @@ public final class RedisService {
     }
 
     public void disconnect() {
+        shutdown = true;
         connected.set(false);
         reconnecting = false;
         try {

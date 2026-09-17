@@ -11,9 +11,9 @@ import com.valorsky.skysignals.model.SkyEventType;
 import com.valorsky.skysignals.notification.NotificationService;
 import com.valorsky.skysignals.rabbitmq.EventPublisher;
 import com.valorsky.skysignals.redis.RedisService;
-import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
+
+import com.valorsky.skysignals.util.FoliaScheduler;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -37,7 +37,7 @@ public class SkyEventManager {
 
     private final Map<UUID, SkyEvent> activeEvents = new ConcurrentHashMap<>();
     private final Set<SkyEventType> registeredEventTypes = new HashSet<>();
-    private BukkitTask tickTask;
+    private FoliaScheduler.TaskHandle tickTask;
 
     public SkyEventManager(
             JavaPlugin plugin,
@@ -69,7 +69,7 @@ public class SkyEventManager {
     }
 
     private void startTickTask() {
-        tickTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 20L, 20L);
+        tickTask = FoliaScheduler.runGlobalTimer(plugin, this::tick, 20L, 20L);
     }
 
     public void tick() {
@@ -152,8 +152,8 @@ public class SkyEventManager {
     public CompletableFuture<Void> startEvent(SkyEventType type) {
         return CompletableFuture.runAsync(() -> {
             try {
-                SkyEvent event = createEvent(type).join();
-                Bukkit.getScheduler().runTask(plugin, () -> startEvent(event));
+        SkyEvent event = createEvent(type).join();
+        FoliaScheduler.runGlobal(plugin, () -> startEvent(event));
             } catch (Exception e) {
                 logger.warning("Failed to start event " + type + ": " + e.getMessage());
             }
@@ -230,7 +230,7 @@ public class SkyEventManager {
     }
 
     public void handleEventStarted(EventState state) {
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        FoliaScheduler.runGlobal(plugin, () -> {
             if (activeEvents.containsKey(state.id())) {
                 return;
             }
@@ -244,7 +244,7 @@ public class SkyEventManager {
     }
 
     public void handleEventFinished(EventState state) {
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        FoliaScheduler.runGlobal(plugin, () -> {
             SkyEvent event = activeEvents.remove(state.id());
             localCache.remove(state.id().toString());
             cache.put(state.id().toString(), state);

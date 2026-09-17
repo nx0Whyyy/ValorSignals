@@ -82,6 +82,10 @@ public final class DatabaseManager {
         if (dataSource != null && !dataSource.isClosed()) {
             dataSource.close();
         }
+        // Shutdown the async executor
+        if (asyncExecutor instanceof java.util.concurrent.ExecutorService es) {
+            es.shutdown();
+        }
         logger.info("Database disconnected.");
     }
 }
