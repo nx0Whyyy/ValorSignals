@@ -69,6 +69,8 @@ public final class SkySignalsPlugin extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
 
+        FoliaScheduler.init(getLogger());
+
         configManager = new ConfigManager(this);
         configManager.initialize();
         messageConfig = configManager.messages();

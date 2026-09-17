@@ -9,8 +9,11 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.lang.reflect.Method;
 import java.util.concurrent.CompletableFuture;
+import java.util.logging.Logger;
 
 public final class FoliaScheduler {
+
+    private static Logger logger;
 
     private FoliaScheduler() {}
 
@@ -22,25 +25,55 @@ public final class FoliaScheduler {
                 Class.forName("org.bukkit.scheduler.GlobalRegionScheduler");
                 foliaDetected = true;
             } catch (ClassNotFoundException e) {
-                foliaDetected = false;
+                try {
+                    Class.forName("org.bukkit.scheduler.ScheduledTask");
+                    foliaDetected = true;
+                } catch (ClassNotFoundException e2) {
+                    foliaDetected = false;
+                }
             }
         }
         return foliaDetected;
     }
 
+    private static void setLogger(Logger log) {
+        logger = log;
+    }
+
+    public static void init(Logger log) {
+        setLogger(log);
+        if (isFolia()) {
+            log.info("[FoliaScheduler] Detected Folia server. Using Folia schedulers.");
+        }
+    }
+
     private static Object getGlobalRegionScheduler() {
         try {
-            return Bukkit.class.getMethod("getGlobalRegionScheduler").invoke(null);
-        } catch (Exception e) {
-            return null;
+            Method method = Bukkit.class.getMethod("getGlobalRegionScheduler");
+            return method.invoke(null);
+        } catch (Exception e1) {
+            try {
+                Method method = Bukkit.class.getMethod("getGlobalScheduler");
+                return method.invoke(null);
+            } catch (Exception e2) {
+                try {
+                    return Bukkit.getServer().getClass().getMethod("getGlobalRegionScheduler").invoke(Bukkit.getServer());
+                } catch (Exception e3) {
+                    return null;
+                }
+            }
         }
     }
 
     private static Object getAsyncScheduler() {
         try {
             return Bukkit.class.getMethod("getAsyncScheduler").invoke(null);
-        } catch (Exception e) {
-            return null;
+        } catch (Exception e1) {
+            try {
+                return Bukkit.getServer().getClass().getMethod("getAsyncScheduler").invoke(Bukkit.getServer());
+            } catch (Exception e2) {
+                return null;
+            }
         }
     }
 
@@ -57,21 +90,13 @@ public final class FoliaScheduler {
         } catch (Exception e) {
             return null;
         }
-        try {
-            Object globalSched = getGlobalRegionScheduler();
-            if (globalSched != null) {
-                Method getRegionSched = Bukkit.class.getMethod("getRegionScheduler", World.class);
-                return getRegionSched.invoke(null, world);
-            }
-        } catch (Exception e) {
-            return null;
-        }
         return null;
     }
 
     private static Object getEntityScheduler(Entity entity) {
         try {
-            return entity.getClass().getMethod("getScheduler").invoke(entity);
+            Method getScheduler = entity.getClass().getMethod("getScheduler");
+            return getScheduler.invoke(entity);
         } catch (Exception e) {
             return null;
         }
@@ -114,7 +139,9 @@ public final class FoliaScheduler {
                             .invoke(sched, plugin, task, delay, period);
                     return new TaskHandle(handle);
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                if (logger != null) logger.warning("[FoliaScheduler] runGlobalRepeating failed: " + e);
+            }
         }
         BukkitTask bukkitTask = Bukkit.getScheduler().runTaskTimer(plugin, task, delay, period);
         return new TaskHandle(bukkitTask);
