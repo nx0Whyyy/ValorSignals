@@ -15,10 +15,10 @@ public final class FoliaScheduler {
 
     private static Boolean foliaDetected = null;
 
-    private static boolean isFolia() {
+    public static boolean isFolia() {
         if (foliaDetected == null) {
             try {
-                Class.forName("org.bukkit.scheduler.GlobalScheduler");
+                Class.forName("org.bukkit.scheduler.GlobalRegionScheduler");
                 foliaDetected = true;
             } catch (ClassNotFoundException e) {
                 foliaDetected = false;
@@ -27,10 +27,49 @@ public final class FoliaScheduler {
         return foliaDetected;
     }
 
+    private static Object getGlobalRegionScheduler() {
+        try {
+            return Bukkit.class.getMethod("getGlobalRegionScheduler").invoke(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static Object getAsyncScheduler() {
+        try {
+            return Bukkit.class.getMethod("getAsyncScheduler").invoke(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static Object getRegionScheduler(Location location) {
+        World world = location.getWorld();
+        if (world == null) return null;
+        try {
+            CompletableFuture<?> future = world.getChunkAtAsync(location);
+            Object chunk = future.getNow(null);
+            if (chunk != null) {
+                return chunk.getClass().getMethod("getScheduler").invoke(chunk);
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static Object getEntityScheduler(Entity entity) {
+        try {
+            return entity.getClass().getMethod("getScheduler").invoke(entity);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     public static void runGlobal(JavaPlugin plugin, Runnable task) {
         if (isFolia()) {
             try {
-                Object sched = Bukkit.class.getMethod("getGlobalScheduler").invoke(null);
+                Object sched = getGlobalRegionScheduler();
                 if (sched != null) {
                     sched.getClass().getMethod("run", JavaPlugin.class, Runnable.class).invoke(sched, plugin, task);
                     return;
@@ -43,7 +82,7 @@ public final class FoliaScheduler {
     public static void runGlobalDelayed(JavaPlugin plugin, Runnable task, long delay) {
         if (isFolia()) {
             try {
-                Object sched = Bukkit.class.getMethod("getGlobalScheduler").invoke(null);
+                Object sched = getGlobalRegionScheduler();
                 if (sched != null) {
                     sched.getClass().getMethod("runDelayed", JavaPlugin.class, Runnable.class, long.class)
                             .invoke(sched, plugin, task, delay);
@@ -55,17 +94,9 @@ public final class FoliaScheduler {
     }
 
     public static TaskHandle runGlobalRepeating(JavaPlugin plugin, Runnable task, long delay, long period) {
-        return runGlobalRepeatingTask(plugin, task, delay, period);
-    }
-
-    public static TaskHandle runGlobalTimer(JavaPlugin plugin, Runnable task, long delay, long period) {
-        return runGlobalRepeatingTask(plugin, task, delay, period);
-    }
-
-    private static TaskHandle runGlobalRepeatingTask(JavaPlugin plugin, Runnable task, long delay, long period) {
         if (isFolia()) {
             try {
-                Object sched = Bukkit.class.getMethod("getGlobalScheduler").invoke(null);
+                Object sched = getGlobalRegionScheduler();
                 if (sched != null) {
                     Object handle = sched.getClass()
                             .getMethod("runAtFixedRate", JavaPlugin.class, Runnable.class, long.class, long.class)
@@ -78,22 +109,19 @@ public final class FoliaScheduler {
         return new TaskHandle(bukkitTask);
     }
 
+    public static TaskHandle runGlobalTimer(JavaPlugin plugin, Runnable task, long delay, long period) {
+        return runGlobalRepeating(plugin, task, delay, period);
+    }
+
     public static void runRegion(JavaPlugin plugin, Location location, Runnable task) {
         if (isFolia()) {
             try {
-                World world = location.getWorld();
-                if (world != null) {
-                    CompletableFuture<?> future = world.getChunkAtAsync(location);
-                    Object chunk = future.getNow(null);
-                    if (chunk != null) {
-                        Object scheduler = chunk.getClass().getMethod("getScheduler").invoke(chunk);
-                        if (scheduler != null) {
-                            scheduler.getClass()
-                                    .getMethod("run", JavaPlugin.class, Location.class, Runnable.class)
-                                    .invoke(scheduler, plugin, location, task);
-                            return;
-                        }
-                    }
+                Object sched = getRegionScheduler(location);
+                if (sched != null) {
+                    sched.getClass()
+                            .getMethod("run", JavaPlugin.class, Location.class, Runnable.class)
+                            .invoke(sched, plugin, location, task);
+                    return;
                 }
             } catch (Exception ignored) {}
         }
@@ -103,19 +131,12 @@ public final class FoliaScheduler {
     public static void runRegionDelayed(JavaPlugin plugin, Location location, Runnable task, long delay) {
         if (isFolia()) {
             try {
-                World world = location.getWorld();
-                if (world != null) {
-                    CompletableFuture<?> future = world.getChunkAtAsync(location);
-                    Object chunk = future.getNow(null);
-                    if (chunk != null) {
-                        Object scheduler = chunk.getClass().getMethod("getScheduler").invoke(chunk);
-                        if (scheduler != null) {
-                            scheduler.getClass()
-                                    .getMethod("runDelayed", JavaPlugin.class, Location.class, Runnable.class, long.class)
-                                    .invoke(scheduler, plugin, location, task, delay);
-                            return;
-                        }
-                    }
+                Object sched = getRegionScheduler(location);
+                if (sched != null) {
+                    sched.getClass()
+                            .getMethod("runDelayed", JavaPlugin.class, Location.class, Runnable.class, long.class)
+                            .invoke(sched, plugin, location, task, delay);
+                    return;
                 }
             } catch (Exception ignored) {}
         }
@@ -123,29 +144,14 @@ public final class FoliaScheduler {
     }
 
     public static TaskHandle runRegionRepeating(JavaPlugin plugin, Location location, Runnable task, long delay, long period) {
-        return runRegionRepeatingTask(plugin, location, task, delay, period);
-    }
-
-    public static TaskHandle runRegionTimer(JavaPlugin plugin, Location location, Runnable task, long delay, long period) {
-        return runRegionRepeatingTask(plugin, location, task, delay, period);
-    }
-
-    private static TaskHandle runRegionRepeatingTask(JavaPlugin plugin, Location location, Runnable task, long delay, long period) {
         if (isFolia()) {
             try {
-                World world = location.getWorld();
-                if (world != null) {
-                    CompletableFuture<?> future = world.getChunkAtAsync(location);
-                    Object chunk = future.getNow(null);
-                    if (chunk != null) {
-                        Object scheduler = chunk.getClass().getMethod("getScheduler").invoke(chunk);
-                        if (scheduler != null) {
-                            Object handle = scheduler.getClass()
-                                    .getMethod("runAtFixedRate", JavaPlugin.class, Location.class, Runnable.class, long.class, long.class)
-                                    .invoke(scheduler, plugin, location, task, delay, period);
-                            return new TaskHandle(handle);
-                        }
-                    }
+                Object sched = getRegionScheduler(location);
+                if (sched != null) {
+                    Object handle = sched.getClass()
+                            .getMethod("runAtFixedRate", JavaPlugin.class, Location.class, Runnable.class, long.class, long.class)
+                            .invoke(sched, plugin, location, task, delay, period);
+                    return new TaskHandle(handle);
                 }
             } catch (Exception ignored) {}
         }
@@ -153,14 +159,18 @@ public final class FoliaScheduler {
         return new TaskHandle(bukkitTask);
     }
 
+    public static TaskHandle runRegionTimer(JavaPlugin plugin, Location location, Runnable task, long delay, long period) {
+        return runRegionRepeating(plugin, location, task, delay, period);
+    }
+
     public static void runEntity(JavaPlugin plugin, Entity entity, Runnable task) {
         if (isFolia()) {
             try {
-                Object scheduler = entity.getClass().getMethod("getScheduler").invoke(entity);
-                if (scheduler != null) {
-                    scheduler.getClass()
+                Object sched = getEntityScheduler(entity);
+                if (sched != null) {
+                    sched.getClass()
                             .getMethod("run", JavaPlugin.class, Runnable.class)
-                            .invoke(scheduler, plugin, task);
+                            .invoke(sched, plugin, task);
                     return;
                 }
             } catch (Exception ignored) {}
@@ -171,11 +181,11 @@ public final class FoliaScheduler {
     public static void runEntityDelayed(JavaPlugin plugin, Entity entity, Runnable task, long delay) {
         if (isFolia()) {
             try {
-                Object scheduler = entity.getClass().getMethod("getScheduler").invoke(entity);
-                if (scheduler != null) {
-                    scheduler.getClass()
+                Object sched = getEntityScheduler(entity);
+                if (sched != null) {
+                    sched.getClass()
                             .getMethod("runDelayed", JavaPlugin.class, Runnable.class, long.class)
-                            .invoke(scheduler, plugin, task, delay);
+                            .invoke(sched, plugin, task, delay);
                     return;
                 }
             } catch (Exception ignored) {}
@@ -186,41 +196,50 @@ public final class FoliaScheduler {
     public static void runAsync(JavaPlugin plugin, Runnable task) {
         if (isFolia()) {
             try {
-                Object asyncScheduler = Bukkit.class.getMethod("getAsyncScheduler").invoke(null);
-                if (asyncScheduler != null) {
-                    asyncScheduler.getClass()
+                Object asyncSched = getAsyncScheduler();
+                if (asyncSched != null) {
+                    asyncSched.getClass()
                             .getMethod("runNow", JavaPlugin.class, Runnable.class)
-                            .invoke(asyncScheduler, plugin, task);
+                            .invoke(asyncSched, plugin, task);
                     return;
                 }
             } catch (Exception ignored) {}
         }
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, task);
+        Thread t = new Thread(task, "SkySignals-Async-Fallback");
+        t.setDaemon(true);
+        t.start();
     }
 
     public static void runAsyncDelayed(JavaPlugin plugin, Runnable task, long delay) {
         if (isFolia()) {
             try {
-                Object asyncScheduler = Bukkit.class.getMethod("getAsyncScheduler").invoke(null);
-                if (asyncScheduler != null) {
-                    asyncScheduler.getClass()
+                Object asyncSched = getAsyncScheduler();
+                if (asyncSched != null) {
+                    asyncSched.getClass()
                             .getMethod("runDelayed", JavaPlugin.class, Runnable.class, long.class)
-                            .invoke(asyncScheduler, plugin, task, delay);
+                            .invoke(asyncSched, plugin, task, delay);
                     return;
                 }
             } catch (Exception ignored) {}
         }
-        Bukkit.getScheduler().runTaskLater(plugin, task, delay);
+        Thread t = new Thread(() -> {
+            try {
+                Thread.sleep(delay * 50L);
+            } catch (InterruptedException ignored) {}
+            task.run();
+        }, "SkySignals-Async-Delayed");
+        t.setDaemon(true);
+        t.start();
     }
 
     public static TaskHandle runAsyncRepeating(JavaPlugin plugin, Runnable task, long interval, long period) {
         if (isFolia()) {
             try {
-                Object asyncScheduler = Bukkit.class.getMethod("getAsyncScheduler").invoke(null);
-                if (asyncScheduler != null) {
-                    Object handle = asyncScheduler.getClass()
+                Object asyncSched = getAsyncScheduler();
+                if (asyncSched != null) {
+                    Object handle = asyncSched.getClass()
                             .getMethod("runAtFixedRate", JavaPlugin.class, Runnable.class, long.class, long.class)
-                            .invoke(asyncScheduler, plugin, task, interval, period);
+                            .invoke(asyncSched, plugin, task, interval, period);
                     return new TaskHandle(handle);
                 }
             } catch (Exception ignored) {}
