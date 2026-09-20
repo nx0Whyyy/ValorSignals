@@ -23,6 +23,7 @@ public record BlockEffectStep(
     @Override
     public void execute(AnimationContext context) {
         Location loc = context.getOrigin().clone().add(offset);
+        FoliaScheduler.runRegion(context.getSequence().getPlugin(), loc, () -> {
         Block block = loc.getBlock();
         BlockData originalData = block.getBlockData();
         block.setType(material);
@@ -40,5 +41,6 @@ public record BlockEffectStep(
                 }, durationTicks
             );
         }
+        });
     }
 }

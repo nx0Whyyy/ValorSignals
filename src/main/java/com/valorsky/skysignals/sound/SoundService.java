@@ -56,12 +56,14 @@ public final class SoundService {
     }
 
     public void play(Sound sound, Location location, List<Player> audience, float volume, float pitch) {
-        if (!config.soundsEnabled()) return;
+        if (!config.visualsEnabled() || !config.soundsEnabled() || location == null) return;
         for (Player player : audience) {
+            com.valorsky.skysignals.util.FoliaScheduler.runEntity(plugin, player, () -> {
             if (player.getWorld().equals(location.getWorld()) &&
                 player.getLocation().distanceSquared(location) <= config.viewDistance() * config.viewDistance()) {
                 player.playSound(location, sound, volume, pitch);
             }
+            });
         }
     }
 
@@ -73,10 +75,11 @@ public final class SoundService {
     }
 
     public void playGlobal(String soundKey) {
+        if (!config.visualsEnabled() || !config.soundsEnabled()) return;
         SoundConfig sc = soundConfigs.get(soundKey);
         if (sc != null) {
             for (Player player : plugin.getServer().getOnlinePlayers()) {
-                player.playSound(player.getLocation(), sc.sound(), sc.volume(), sc.pitch());
+                com.valorsky.skysignals.util.FoliaScheduler.runEntity(plugin, player, () -> player.playSound(player.getLocation(), sc.sound(), sc.volume(), sc.pitch()));
             }
         }
     }

@@ -29,6 +29,7 @@ public final class StormEvent extends AbstractSkyEvent {
     private final Logger logger;
 
     private World world;
+    private boolean weatherCaptured;
     private boolean wasStorming = false;
     private boolean wasThundering = false;
     private TaskHandle stormTask;
@@ -107,6 +108,7 @@ public final class StormEvent extends AbstractSkyEvent {
     private void startTransition() {
         if (world == null) return;
 
+        weatherCaptured = true;
         wasStorming = world.hasStorm();
         wasThundering = world.isThundering();
 
@@ -119,16 +121,10 @@ public final class StormEvent extends AbstractSkyEvent {
             if (!audience.isEmpty()) {
                 CloudShape cloud = new CloudShape(20, 3, 12);
                 Location loc = world.getSpawnLocation();
-                cloud.spawn(loc, Particle.CLOUD, 10, 0.01, audience);
+                particleService.spawnCloud(loc, Particle.CLOUD, 20, 10, 0.01, audience);
             }
         }, 20L, 10L);
 
-        FoliaScheduler.runGlobalDelayed(plugin, () -> {
-            if (getStatus() == SkyEventStatus.WARNING) {
-                SkyEventManager em = (SkyEventManager) plugin.getServer().getPluginManager().getPlugin("SkySignals");
-                em.transitionPhase(this, SkyEventPhase.ACTIVE);
-            }
-        }, 200L);
     }
 
     private void startStorm() {
@@ -151,13 +147,14 @@ public final class StormEvent extends AbstractSkyEvent {
             Location loc = target.getLocation().add(
                 random.nextInt(20) - 10, 0, random.nextInt(20) - 10
             );
-            loc.setY(world.getHighestBlockYAt(loc));
-
             FoliaScheduler.runRegion(plugin, loc, () -> {
+                if (cancelled || getStatus() == SkyEventStatus.FINISHED) return;
+                if (!world.isChunkLoaded(loc.getBlockX() >> 4, loc.getBlockZ() >> 4)) return;
+                loc.setY(world.getHighestBlockYAt(loc));
                 world.strikeLightningEffect(loc);
                 for (Player p : players) {
                     if (p.getWorld().equals(world)) {
-                        p.playSound(p.getLocation(), Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f);
+                        FoliaScheduler.runEntity(plugin, p, () -> p.playSound(p.getLocation(), Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f));
                     }
                 }
             });
@@ -182,9 +179,10 @@ public final class StormEvent extends AbstractSkyEvent {
             Location loc = target.getLocation().add(
                 random.nextInt(30) - 15, 0, random.nextInt(30) - 15
             );
-            loc.setY(world.getHighestBlockYAt(loc));
-
             FoliaScheduler.runRegion(plugin, loc, () -> {
+                if (cancelled || getStatus() == SkyEventStatus.FINISHED) return;
+                if (!world.isChunkLoaded(loc.getBlockX() >> 4, loc.getBlockZ() >> 4)) return;
+                loc.setY(world.getHighestBlockYAt(loc));
                 world.strikeLightningEffect(loc);
             });
         }, 200L, 100L);
@@ -199,12 +197,15 @@ public final class StormEvent extends AbstractSkyEvent {
         if (stormTask != null) stormTask.cancel();
         if (lightningTask != null) lightningTask.cancel();
 
-        if (world != null) {
-            FoliaScheduler.runGlobal(plugin, () -> {
+        if (world != null && weatherCaptured) {
+            weatherCaptured = false;
+            Runnable restore = () -> {
                 world.setStorm(wasStorming);
                 world.setThundering(wasThundering);
                 logger.info("Storm event stopped, weather restored.");
-            });
+            };
+            if (Bukkit.isGlobalTickThread()) restore.run();
+            else FoliaScheduler.runGlobal(plugin, restore);
         }
     }
 

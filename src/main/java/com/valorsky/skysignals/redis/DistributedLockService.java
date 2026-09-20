@@ -17,6 +17,7 @@ public final class DistributedLockService {
     private final JavaPlugin plugin;
     private final Config config;
     private final RedisClient client;
+    private io.lettuce.core.api.StatefulRedisConnection<String, String> connection;
     private volatile RedisCommands<String, String> sync;
     private final Logger logger;
     private final String lockPrefix = "lock:skysignals:";
@@ -36,7 +37,8 @@ public final class DistributedLockService {
         this.client = client;
         boolean tmpEnabled = false;
         try {
-            this.sync = client.connect().sync();
+            this.connection = client.connect();
+            this.sync = connection.sync();
             tmpEnabled = true;
             logger.info("Distributed lock service initialized.");
         } catch (Exception e) {
@@ -68,7 +70,7 @@ public final class DistributedLockService {
                 return false;
             }
             String key = lockPrefix + lockName;
-            String value = ownerId + ":" + System.currentTimeMillis();
+            String value = ownerId;
             String acquired = sync.set(key, value, new SetArgs().nx().ex((int) ttl.getSeconds()));
             return acquired != null;
         });
@@ -80,12 +82,10 @@ public final class DistributedLockService {
                 return true;
             }
             String key = lockPrefix + lockName;
-            String currentValue = sync.get(key);
-            if (currentValue != null && currentValue.startsWith(ownerId + ":")) {
-                sync.del(key);
-                return true;
-            }
-            return false;
+            Long removed = sync.eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+                    io.lettuce.core.ScriptOutputType.INTEGER, new String[]{key}, ownerId);
+            return removed != null && removed == 1;
+
         });
     }
 
@@ -95,12 +95,10 @@ public final class DistributedLockService {
                 return false;
             }
             String key = lockPrefix + lockName;
-            String currentValue = sync.get(key);
-            if (currentValue != null && currentValue.startsWith(ownerId + ":")) {
-                sync.expire(key, (int) ttl.getSeconds());
-                return true;
-            }
-            return false;
+            Long extended = sync.eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('expire', KEYS[1], ARGV[2]) else return 0 end",
+                    io.lettuce.core.ScriptOutputType.INTEGER, new String[]{key}, ownerId, Long.toString(Math.max(1, ttl.getSeconds())));
+            return extended != null && extended == 1;
+
         });
     }
 
@@ -125,6 +123,7 @@ public final class DistributedLockService {
     }
 
     public void shutdown() {
+        if (connection != null) connection.close();
     }
 
     public <T> CompletableFuture<T> executeWithLock(String lockName, Duration ttl, String ownerId, Supplier<T> action) {

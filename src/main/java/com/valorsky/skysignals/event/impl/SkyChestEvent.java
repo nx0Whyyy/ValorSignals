@@ -44,6 +44,7 @@ public final class SkyChestEvent extends AbstractSkyEvent {
     private TaskHandle descentTask;
     private TaskHandle unlockTask;
     private final AtomicBoolean hasLanded = new AtomicBoolean(false);
+    private final AtomicBoolean claimed = new AtomicBoolean(false);
     private final AtomicBoolean isUnlocked = new AtomicBoolean(false);
     private final Set<UUID> claimedPlayers = ConcurrentHashMap.newKeySet();
 
@@ -86,7 +87,7 @@ public final class SkyChestEvent extends AbstractSkyEvent {
     @Override
     protected void onCompleting() {
         this.status = SkyEventStatus.COMPLETING;
-        unlockChest();
+        if (chestLocation != null) FoliaScheduler.runRegion(plugin, chestLocation, this::unlockChest);
     }
 
     @Override
@@ -102,24 +103,31 @@ public final class SkyChestEvent extends AbstractSkyEvent {
     }
 
     private void findLocationAndAnnounce() {
-        Player firstPlayer = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
-        Location playerLoc = firstPlayer != null ? firstPlayer.getLocation() : null;
-
-        locationService.findSafeLocation(playerLoc, 50, 200).ifPresentOrElse(loc -> {
-            chestLocation = loc;
+        locationService.findNearPlayersAsync(50, 200).whenComplete((location, error) -> {
+            if (!plugin.isEnabled()) return;
+            FoliaScheduler.runGlobal(plugin, () -> {
+                if (getStatus() != SkyEventStatus.ANNOUNCING) return;
+                if (error != null || location.isEmpty()) {
+                    logger.warning("No safe loaded location for " + getType());
+                    cancel();
+                    return;
+                }
+                Location loc = location.get();
+                chestLocation = loc;
             beamStart = loc.clone().add(0, 50, 0);
-            notificationService.notifyEventPhase(this, "descending");
-            soundService.playGlobal("sky_chest_descend");
-        }, () -> {
-            logger.warning("Could not find safe location for sky chest. Cancelling.");
-            this.status = SkyEventStatus.CANCELLED;
+                notificationService.notifyEventPhase(this, "descending");
+                soundService.playGlobal("sky_chest_descend");
+            });
         });
     }
+
+    @Override
+    public boolean isReady() { return chestLocation != null; }
 
     private void startDescent() {
         if (chestLocation == null) return;
 
-        beamTask = FoliaScheduler.runGlobalTimer(plugin, () -> {
+        beamTask = FoliaScheduler.runRegionTimer(plugin, chestLocation, () -> {
             if (chestLocation == null || hasLanded.get()) {
                 if (beamTask != null) beamTask.cancel();
                 return;
@@ -127,11 +135,11 @@ public final class SkyChestEvent extends AbstractSkyEvent {
             List<Player> audience = getNearbyPlayers(chestLocation, 48);
             if (!audience.isEmpty()) {
                 BeamShape beam = new BeamShape(beamStart, chestLocation, 1.0, 20);
-                beam.spawn(chestLocation, Particle.END_ROD, 20, 0.01, audience);
+                particleService.spawnBeam(beamStart, chestLocation, Particle.END_ROD, 1.0, 20, 0.01, audience);
             }
         }, 0L, 2L);
 
-        descentTask = FoliaScheduler.runGlobalTimer(plugin, new Runnable() {
+        descentTask = FoliaScheduler.runRegionTimer(plugin, chestLocation, new Runnable() {
             double progress = 0;
             @Override
             public void run() {
@@ -160,7 +168,9 @@ public final class SkyChestEvent extends AbstractSkyEvent {
     private void landChest() {
         if (chestLocation == null || chestLocation.getWorld() == null) return;
 
+        if (cancelled || getStatus() == SkyEventStatus.FINISHED) return;
         Block block = chestLocation.getBlock();
+        if (!block.isEmpty()) { cancel(); return; }
         block.setType(Material.CHEST);
         Chest chest = (Chest) block.getState();
         chestBlock = chest;
@@ -169,6 +179,7 @@ public final class SkyChestEvent extends AbstractSkyEvent {
         pdc.set(new NamespacedKey(plugin, "skysignals_event"), PersistentDataType.STRING, id.toString());
         pdc.set(new NamespacedKey(plugin, "skysignals_chest"), PersistentDataType.BYTE, (byte) 1);
 
+        chest.update();
         fillChestWithLoot();
 
         List<Player> audience = getNearbyPlayers(chestLocation, 48);
@@ -195,7 +206,7 @@ public final class SkyChestEvent extends AbstractSkyEvent {
         soundService.playGlobal("sky_chest_unlock");
 
         int[] countdown = {10};
-        unlockTask = FoliaScheduler.runGlobalTimer(plugin, () -> {
+        unlockTask = FoliaScheduler.runRegionTimer(plugin, chestLocation, () -> {
             if (isUnlocked.get()) {
                 unlockTask.cancel();
                 return;
@@ -225,32 +236,39 @@ public final class SkyChestEvent extends AbstractSkyEvent {
         }
     }
 
-    public boolean tryClaim(Player player) {
-        if (claimedPlayers.contains(player.getUniqueId())) {
-            player.sendMessage(Component.text("§cCette caisse a déjà été récupérée."));
-            return false;
-        }
-
+    public java.util.concurrent.CompletableFuture<Boolean> tryClaim(Player player) {
         if (!isUnlocked.get()) {
-            player.sendMessage(Component.text("§cLa caisse est encore verrouillée !"));
-            return false;
+            player.sendMessage(Component.text("La caisse est encore verrouillée !"));
+            return java.util.concurrent.CompletableFuture.completedFuture(false);
         }
-
-        if (claimedPlayers.add(player.getUniqueId())) {
-            rewardService.giveRewards(id, SkyEventType.SKY_CHEST, player.getUniqueId(), serverId);
-            soundService.play("success", player.getLocation(), List.of(player));
-            return true;
+        if (!claimed.compareAndSet(false, true)) {
+            player.sendMessage(Component.text("Cette caisse a déjà été récupérée."));
+            return java.util.concurrent.CompletableFuture.completedFuture(false);
         }
-        return false;
+        if (!rewardService.rewardsAllowed(id)) return java.util.concurrent.CompletableFuture.completedFuture(true);
+        return rewardService.giveRewards(id, SkyEventType.SKY_CHEST, player.getUniqueId(), serverId)
+            .handle((result, error) -> {
+                boolean success = error == null && result.success();
+                if (!success) {
+                    claimed.set(false);
+                    FoliaScheduler.runEntity(plugin, player, () -> player.sendMessage(Component.text("Récompense indisponible, réessaie dans un instant.")));
+                } else {
+                    FoliaScheduler.runEntity(plugin, player, () -> soundService.play("success", player.getLocation(), List.of(player)));
+                }
+                return success;
+            });
     }
 
     private void removeChest() {
-        if (chestBlock != null) {
-            Location loc = chestBlock.getLocation();
-            Block block = loc.getBlock();
-            if (block.getType() == Material.CHEST) {
-                block.setType(Material.AIR);
-            }
+        if (chestLocation != null) {
+            Location loc = chestLocation;
+            FoliaScheduler.runRegion(plugin, loc, () -> {
+                if (loc.getBlock().getState() instanceof Chest chest && id.toString().equals(
+                        chest.getPersistentDataContainer().get(new NamespacedKey(plugin, "skysignals_event"), PersistentDataType.STRING))) {
+                    chest.getInventory().clear();
+                    loc.getBlock().setType(Material.AIR);
+                }
+            });
         }
 
         if (beamTask != null) beamTask.cancel();

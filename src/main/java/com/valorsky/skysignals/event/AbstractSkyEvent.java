@@ -23,11 +23,11 @@ public abstract class AbstractSkyEvent implements SkyEvent {
     protected Instant startedAt;
     protected final Instant endsAt;
     protected final JavaPlugin plugin;
-    protected SkyEventStatus status;
-    protected SkyEventPhase phase;
+    protected volatile SkyEventStatus status;
+    protected volatile SkyEventPhase phase;
     protected long elapsedSeconds;
     protected final Random random = new Random();
-    protected boolean cancelled = false;
+    protected volatile boolean cancelled = false;
 
     protected AbstractSkyEvent(EventState state, JavaPlugin plugin) {
         this.id = state.id();
@@ -102,6 +102,7 @@ public abstract class AbstractSkyEvent implements SkyEvent {
 
     @Override
     public void onPhaseChange(SkyEventPhase newPhase) {
+        if (newPhase == SkyEventPhase.CANCELLED) this.cancelled = true;
         this.phase = newPhase;
         this.status = phaseToStatus(newPhase);
         switch (newPhase) {

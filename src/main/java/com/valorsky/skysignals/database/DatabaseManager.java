@@ -18,7 +18,7 @@ public final class DatabaseManager {
     private final Config config;
     private final Logger logger;
     private final AtomicBoolean connected = new AtomicBoolean(false);
-    private HikariDataSource dataSource;
+    private volatile HikariDataSource dataSource;
     private volatile boolean shutdown = false;
 
     public DatabaseManager(JavaPlugin plugin, Config config, Logger logger) {
@@ -47,11 +47,16 @@ public final class DatabaseManager {
                 hikariConfig.addDataSourceProperty("useUnicode", "true");
                 hikariConfig.addDataSourceProperty("characterEncoding", "utf8");
 
-                dataSource = new HikariDataSource(hikariConfig);
-                connected.set(true);
-                logger.info("Database connection established.");
-
-                runMigrations();
+                HikariDataSource opened = new HikariDataSource(hikariConfig);
+                try {
+                    SchemaManager.runMigrations(opened, logger);
+                    synchronized (this) {
+                        if (shutdown) { opened.close(); return; }
+                        dataSource = opened;
+                        connected.set(true);
+                    }
+                    logger.info("Database connection established.");
+                } catch (Exception e) { opened.close(); throw e; }
             } catch (Exception e) {
                 logger.warning("Failed to connect to database: " + e.getMessage() + ". Database features disabled.");
                 connected.set(false);
@@ -80,7 +85,7 @@ public final class DatabaseManager {
         return (Runnable r) -> FoliaScheduler.runAsync(plugin, r);
     }
 
-    public void disconnect() {
+    public synchronized void disconnect() {
         shutdown = true;
         connected.set(false);
         if (dataSource != null) {

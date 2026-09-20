@@ -35,11 +35,11 @@ public final class AnimationService {
 
         if (step instanceof DelayStep delayStep) {
             long delay = delayStep.ticks();
-            FoliaScheduler.TaskHandle task = FoliaScheduler.runGlobalTimer(plugin, () -> {
+            context.setTask(FoliaScheduler.runGlobalDelayed(plugin, () -> {
                 if (context.nextStep()) {
                     runStep(context);
                 }
-            }, delay, 1);
+            }, delay));
         } else {
             FoliaScheduler.runGlobal(plugin, () -> {
                 try {

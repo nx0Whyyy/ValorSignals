@@ -39,11 +39,11 @@ public class Config {
     }
 
     public int schedulerMinInterval() {
-        return config.getInt("scheduler.min-interval", 300);
+        return Math.max(1, config.getInt("scheduler.min-interval", 300));
     }
 
     public int schedulerMaxInterval() {
-        return config.getInt("scheduler.max-interval", 900);
+        return Math.max(schedulerMinInterval(), config.getInt("scheduler.max-interval", 900));
     }
 
     public Set<SkyEventType> getAllowedSchedulerEvents() {
@@ -63,7 +63,7 @@ public class Config {
         Map<SkyEventType, Integer> weights = new EnumMap<>(SkyEventType.class);
         for (SkyEventType type : SkyEventType.values()) {
             String path = "event-weights." + type.configKey();
-            weights.put(type, config.getInt(path, 10));
+            weights.put(type, Math.max(0, config.getInt(path, 10)));
         }
         return weights;
     }
@@ -175,11 +175,11 @@ public class Config {
     }
 
     public int getMobInvasionMaxMobs() {
-        return config.getInt("events-config.mob-invasion.max-mobs", 20);
+        return config.getInt("events-config.mob_invasion.max-mobs", 20);
     }
 
     public List<MobWaveConfig> getMobInvasionWaves() {
-        List<?> raw = config.getList("events-config.mob-invasion.waves");
+        List<?> raw = config.getList("events-config.mob_invasion.waves");
         List<MobWaveConfig> waves = new ArrayList<>();
         if (raw != null) {
             for (Object obj : raw) {
@@ -205,16 +205,16 @@ public class Config {
     }
 
     public int getMineralRainMaxActiveItems() {
-        return config.getInt("events-config.mineral-rain.max-active-items", 25);
+        return config.getInt("events-config.mineral_rain.max-active-items", 25);
     }
 
     public int getMineralRainSpawnInterval() {
-        return config.getInt("events-config.mineral-rain.spawn-interval", 10);
+        return Math.max(1, config.getInt("events-config.mineral_rain.spawn-interval", 10));
     }
 
     public Map<Material, Integer> getMineralRainDrops() {
         Map<Material, Integer> drops = new EnumMap<>(Material.class);
-        List<?> raw = config.getList("events-config.mineral-rain.drops");
+        List<?> raw = config.getList("events-config.mineral_rain.drops");
         if (raw != null) {
             for (Object obj : raw) {
                 if (obj instanceof Map<?, ?> map) {
@@ -237,11 +237,11 @@ public class Config {
     }
 
     public double getGrowthBoostMultiplier() {
-        return config.getDouble("events-config.growth-boost.multiplier", 2.0);
+        return config.getDouble("events-config.growth_boost.multiplier", 2.0);
     }
 
     public int getGrowthBoostVisualCooldown() {
-        return config.getInt("events-config.growth-boost.visual.particle-cooldown", 20);
+        return config.getInt("events-config.growth_boost.visual.particle-cooldown", 20);
     }
 
     public boolean redisEnabled() {
@@ -358,7 +358,7 @@ public class Config {
             return envValue;
         }
         String configValue = config.getString(configPath, defaultValue);
-        return configValue != null ? configValue : defaultValue;
+        return configValue != null && !configValue.matches("\\$\\{[^}]+}") ? configValue : defaultValue;
     }
 
     public FileConfiguration getConfig() {

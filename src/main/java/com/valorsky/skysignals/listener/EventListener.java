@@ -57,13 +57,14 @@ public final class EventListener implements Listener {
         for (SkyEvent activeEvent : eventManager.getActiveEvents()) {
             if (activeEvent.getId().toString().equals(eventId) && activeEvent instanceof SkyChestEvent chestEvent) {
                 event.setCancelled(true);
-                boolean claimed = chestEvent.tryClaim(event.getPlayer());
-                if (claimed) {
-                    FoliaScheduler.runRegion(plugin, chest.getLocation(), () -> {
-                        chest.getInventory().clear();
-                        clickedBlock.setType(Material.AIR);
+                chestEvent.tryClaim(event.getPlayer()).thenAccept(claimed -> {
+                    if (claimed && plugin.isEnabled()) FoliaScheduler.runRegion(plugin, chest.getLocation(), () -> {
+                        if (clickedBlock.getState() instanceof Chest current && eventId.equals(current.getPersistentDataContainer().get(eventKey, PersistentDataType.STRING))) {
+                            current.getInventory().clear();
+                            clickedBlock.setType(Material.AIR);
+                        }
                     });
-                }
+                });
                 return;
             }
         }
@@ -96,35 +97,20 @@ public final class EventListener implements Listener {
     }
 
     @EventHandler
-    public void onEntityDamageByEntity(EntityDamageByEntityEvent event) {
-        Entity damager = event.getDamager();
-        Entity target = event.getEntity();
-
-        if (!(damager instanceof Player player)) return;
-
-        // Check if killing a mob invasion mob
-        if (target instanceof LivingEntity living) {
-            String eventId = living.getPersistentDataContainer().get(eventKey, PersistentDataType.STRING);
-            Byte isEventMob = living.getPersistentDataContainer().get(mobKey, PersistentDataType.BYTE);
-
-            if (eventId != null && isEventMob != null) {
-                UUID eventUUID = UUID.fromString(eventId);
-                for (SkyEvent activeEvent : eventManager.getActiveEvents()) {
-                    if (activeEvent.getId().equals(eventUUID) && activeEvent instanceof MobInvasionEvent invasion) {
-                        invasion.onMobKill(player, living);
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    @EventHandler
     public void onEntityDeath(EntityDeathEvent event) {
         LivingEntity entity = event.getEntity();
         Byte isEventMob = entity.getPersistentDataContainer().get(mobKey, PersistentDataType.BYTE);
 
         if (isEventMob != null) {
+            Player killer = entity.getKiller();
+            String eventId = entity.getPersistentDataContainer().get(eventKey, PersistentDataType.STRING);
+            if (killer != null && eventId != null) {
+                for (SkyEvent activeEvent : eventManager.getActiveEvents()) {
+                    if (activeEvent instanceof MobInvasionEvent invasion && activeEvent.getId().toString().equals(eventId)) {
+                        invasion.onMobKill(killer, entity);
+                    }
+                }
+            }
             // Clear drops from event mobs
             event.getDrops().clear();
             event.setDroppedExp(0);

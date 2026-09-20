@@ -18,12 +18,16 @@ import java.util.logging.Logger;
 
 public final class EventRepository {
 
-    private final DataSource dataSource;
+    private final java.util.function.Supplier<DataSource> dataSourceProvider;
     private final Logger logger;
     private final Gson gson;
 
     public EventRepository(DataSource dataSource, Logger logger) {
-        this.dataSource = dataSource;
+        this(() -> dataSource, logger);
+    }
+
+    public EventRepository(java.util.function.Supplier<DataSource> dataSourceProvider, Logger logger) {
+        this.dataSourceProvider = dataSourceProvider;
         this.logger = logger;
         this.gson = new GsonBuilder()
             .registerTypeAdapter(Instant.class, new InstantAdapter())
@@ -33,6 +37,7 @@ public final class EventRepository {
     }
 
     public void saveEventState(EventState state) {
+        DataSource dataSource = dataSourceProvider.get();
         if (dataSource == null) return;
         try (Connection conn = dataSource.getConnection()) {
             String sql = "INSERT INTO sky_signals_events (event_id, type, server, scope, scheduled_at, started_at, ended_at, status, phase, elapsed_seconds, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
@@ -56,13 +61,14 @@ public final class EventRepository {
     }
 
     public void updateEventStatus(UUID eventId, SkyEventStatus status, Instant timestamp) {
+        DataSource dataSource = dataSourceProvider.get();
         if (dataSource == null) return;
         try (Connection conn = dataSource.getConnection()) {
-            String sql = "UPDATE sky_signals_events SET status = ?, phase = ?, ended_at = ? WHERE event_id = ?";
+            String sql = "UPDATE sky_signals_events SET status = ?, phase = ?, ended_at = COALESCE(?, ended_at) WHERE event_id = ?";
             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, status.name());
                 stmt.setString(2, statusToPhase(status).name());
-                stmt.setTimestamp(3, Timestamp.from(timestamp));
+                stmt.setTimestamp(3, status == SkyEventStatus.FINISHED || status == SkyEventStatus.CANCELLED ? Timestamp.from(timestamp) : null);
                 stmt.setString(4, eventId.toString());
                 stmt.executeUpdate();
             }
@@ -84,6 +90,7 @@ public final class EventRepository {
     }
 
     public void recordParticipation(UUID eventId, UUID playerId, int contribution, boolean rewarded) {
+        DataSource dataSource = dataSourceProvider.get();
         if (dataSource == null) return;
         try (Connection conn = dataSource.getConnection()) {
             String sql = "INSERT INTO sky_signals_participation (event_id, uuid, contribution, rewarded, created_at) VALUES (?, ?, ?, ?, ?) " +
@@ -102,6 +109,7 @@ public final class EventRepository {
     }
 
     public boolean hasBeenRewarded(UUID eventId, UUID playerId) {
+        DataSource dataSource = dataSourceProvider.get();
         if (dataSource == null) return false;
         try (Connection conn = dataSource.getConnection()) {
             String sql = "SELECT rewarded FROM sky_signals_participation WHERE event_id = ? AND uuid = ?";
@@ -119,6 +127,7 @@ public final class EventRepository {
     }
 
     public boolean hasBeenClaimed(String claimKey) {
+        DataSource dataSource = dataSourceProvider.get();
         if (dataSource == null) return false;
         try (Connection conn = dataSource.getConnection()) {
             String sql = "SELECT 1 FROM sky_signals_rewards WHERE claim_key = ?";
@@ -135,6 +144,7 @@ public final class EventRepository {
     }
 
     public void recordClaim(String claimKey, UUID eventId, UUID playerId, String eventType, String rewardType, String rewardData) {
+        DataSource dataSource = dataSourceProvider.get();
         if (dataSource == null) return;
         try (Connection conn = dataSource.getConnection()) {
             String sql = "INSERT IGNORE INTO sky_signals_rewards (claim_key, event_id, player_uuid, event_type, reward_type, reward_data) VALUES (?, ?, ?, ?, ?, ?)";
@@ -153,10 +163,11 @@ public final class EventRepository {
     }
 
     public List<EventHistoryEntry> getRecentEvents(int limit) {
+        DataSource dataSource = dataSourceProvider.get();
         if (dataSource == null) return List.of();
         List<EventHistoryEntry> result = new ArrayList<>();
         try (Connection conn = dataSource.getConnection()) {
-            String sql = "SELECT event_id, type, server, started_at, ended_at, status FROM sky_signals_events ORDER BY ended_at DESC LIMIT ?";
+            String sql = "SELECT event_id, type, server, started_at, ended_at, status FROM sky_signals_events WHERE status IN ('FINISHED', 'CANCELLED') AND ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT ?";
             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                 stmt.setInt(1, limit);
                 try (ResultSet rs = stmt.executeQuery()) {

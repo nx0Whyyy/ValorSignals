@@ -39,6 +39,8 @@ public final class MineralRainEvent extends AbstractSkyEvent {
     private Location rainCenter;
     private TaskHandle spawnTask;
     private TaskHandle cleanupTask;
+    private final Map<UUID, Item> items = new ConcurrentHashMap<>();
+    private final Map<UUID, TaskHandle> trails = new ConcurrentHashMap<>();
     private final AtomicInteger activeItems = new AtomicInteger(0);
     private final int maxActiveItems;
     private final int spawnInterval;
@@ -97,35 +99,37 @@ public final class MineralRainEvent extends AbstractSkyEvent {
     }
 
     private void findRainLocation() {
-        Player firstPlayer = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
-        Location playerLoc = firstPlayer != null ? firstPlayer.getLocation() : null;
-        locationService.findSafeLocation(playerLoc, 30, 150).ifPresentOrElse(loc -> {
-            rainCenter = loc;
-            notificationService.notifyEventPhase(this, "start");
-            soundService.playGlobal("mineral_rain_start");
-        }, () -> {
-            logger.warning("Could not find safe location for mineral rain. Cancelling.");
-            this.status = SkyEventStatus.CANCELLED;
+        locationService.findNearPlayersAsync(30, 150).whenComplete((location, error) -> {
+            if (!plugin.isEnabled()) return;
+            FoliaScheduler.runGlobal(plugin, () -> {
+                if (getStatus() != SkyEventStatus.ANNOUNCING) return;
+                if (error != null || location.isEmpty()) {
+                    logger.warning("No safe loaded location for " + getType());
+                    cancel();
+                    return;
+                }
+                Location loc = location.get();
+                rainCenter = loc;
+
+                notificationService.notifyEventPhase(this, "start");
+                soundService.playGlobal("mineral_rain_start");
+            });
         });
     }
+
+    @Override
+    public boolean isReady() { return rainCenter != null; }
 
     private void startRain() {
         if (rainCenter == null) return;
 
         spawnTask = FoliaScheduler.runGlobalTimer(plugin, () -> {
+            for (Item item : items.values()) if (!item.isValid()) removeItem(item);
             if (activeItems.get() >= maxActiveItems) return;
             if (rainCenter == null || rainCenter.getWorld() == null) return;
 
             spawnMineralDrop();
         }, 0L, spawnInterval * 20L);
-
-        // Auto-stop after duration
-        int duration = config.getEventDuration(SkyEventType.MINERAL_RAIN);
-        FoliaScheduler.runGlobalDelayed(plugin, () -> {
-            if (getStatus() == SkyEventStatus.ACTIVE) {
-                ((SkyEventManager) plugin.getServer().getPluginManager().getPlugin("SkySignals")).transitionPhase(this, SkyEventPhase.COMPLETING);
-            }
-        }, duration * 20L);
 
         logger.info("Mineral rain started at " + rainCenter.getWorld().getName());
     }
@@ -150,9 +154,15 @@ public final class MineralRainEvent extends AbstractSkyEvent {
         if (material == null) material = Material.IRON_INGOT;
 
         ItemStack stack = new ItemStack(material, 1 + (int)(Math.random() * 3));
+        FoliaScheduler.runRegion(plugin, spawnLoc, () -> {
+        if (cancelled || getStatus() == SkyEventStatus.FINISHED || getStatus() == SkyEventStatus.COMPLETING) {
+            activeItems.decrementAndGet(); return;
+        }
         Item item = world.dropItemNaturally(spawnLoc, stack);
+        items.put(item.getUniqueId(), item);
         item.setVelocity(new Vector(0, -0.5, 0));
-        item.setPickupDelay(20);
+        item.setPickupDelay(rewardService.rewardsAllowed(id) ? 20 : Integer.MAX_VALUE);
+        item.setPersistent(false);
 
         // Mark as event item
         item.getPersistentDataContainer().set(
@@ -165,14 +175,15 @@ public final class MineralRainEvent extends AbstractSkyEvent {
         );
 
         // Trail particles
-        FoliaScheduler.runRegionTimer(plugin, spawnLoc, new Runnable() {
+        TaskHandle trail = FoliaScheduler.runEntityRepeating(plugin, item, new Runnable() {
             int ticks = 0;
             @Override
             public void run() {
-                if (!item.isValid() || item.isOnGround() || ticks > 100) {
-                    activeItems.decrementAndGet();
+                if (!item.isValid() || ticks > 100) {
+                    removeItem(item);
                     return;
                 }
+                if (item.isOnGround()) { ticks++; return; }
                 List<Player> audience = getNearbyPlayers(item.getLocation(), 48);
                 if (!audience.isEmpty()) {
                     particleService.spawnCircle(item.getLocation(), Particle.HAPPY_VILLAGER, 1, 3, 0.02, audience);
@@ -181,7 +192,16 @@ public final class MineralRainEvent extends AbstractSkyEvent {
             }
         }, 1L, 2L);
 
+        trails.put(item.getUniqueId(), trail);
         soundService.play("mineral_rain_drop", spawnLoc, getNearbyPlayers(spawnLoc, 48));
+        });
+    }
+
+    private void removeItem(Item item) {
+        TaskHandle trail = trails.remove(item.getUniqueId());
+        if (trail != null) trail.cancel();
+        if (items.remove(item.getUniqueId()) != null) activeItems.decrementAndGet();
+        FoliaScheduler.runEntity(plugin, item, item::remove);
     }
 
     private Material pickRandomMaterial() {
@@ -208,31 +228,7 @@ public final class MineralRainEvent extends AbstractSkyEvent {
     }
 
     private void cleanupGroundItems() {
-        if (rainCenter == null || rainCenter.getWorld() == null) return;
-
-        int removed = 0;
-        for (org.bukkit.entity.Entity entity : rainCenter.getWorld().getNearbyEntities(rainCenter, 30, 30, 30)) {
-            if (entity instanceof Item item) {
-                String eventId = item.getPersistentDataContainer().get(
-                    new NamespacedKey(plugin, "skysignals_event"),
-                    PersistentDataType.STRING
-                );
-                if (id.toString().equals(eventId)) {
-                    item.remove();
-                    removed++;
-                    activeItems.decrementAndGet();
-                }
-            }
-        }
-
-        if (removed == 0 && activeItems.get() == 0) {
-            if (cleanupTask != null) cleanupTask.cancel();
-            FoliaScheduler.runGlobalDelayed(plugin, () -> {
-                if (getStatus() == SkyEventStatus.COMPLETING) {
-                    ((SkyEventManager) plugin.getServer().getPluginManager().getPlugin("SkySignals")).transitionPhase(this, SkyEventPhase.FINISHED);
-                }
-            }, 20L);
-        }
+        for (Item item : items.values()) removeItem(item);
     }
 
     private void cleanupItems() {

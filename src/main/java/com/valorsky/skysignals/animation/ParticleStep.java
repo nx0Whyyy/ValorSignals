@@ -27,7 +27,7 @@ public record ParticleStep(
             if (player.getWorld().equals(origin.getWorld()) &&
                 player.getLocation().distanceSquared(origin) <= 2304) { // 48^2
                 Location loc = offset != null ? origin.clone().add(offset) : origin.clone();
-                player.spawnParticle(particle, loc, count, offsetX, offsetY, offsetZ, speed, extra);
+                player.spawnParticle(particle, loc, count, offsetX, offsetY, offsetZ, speed);
             }
         }
     }

@@ -66,6 +66,7 @@ public final class SkySignalsCommand implements TabExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (!sender.hasPermission("valorsky.skysignals.use")) return true;
         if (args.length == 0) {
             sendHelp(sender);
             return true;
@@ -128,6 +129,7 @@ public final class SkySignalsCommand implements TabExecutor {
     }
 
     private void cmdHistory(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("valorsky.skysignals.history")) return;
         sender.sendMessage(miniMessage.deserialize("<gradient:#9333ea:#3b82f6>☁ HISTORIQUE SKY SIGNALS</gradient>"));
         var events = api.getRecentEvents(10);
         if (events.isEmpty()) {
@@ -155,7 +157,7 @@ public final class SkySignalsCommand implements TabExecutor {
             sender.sendMessage(miniMessage.deserialize(messages.getWithPrefix("no-permission")));
             return;
         }
-        api.reload();
+        com.valorsky.skysignals.util.FoliaScheduler.runGlobal(plugin, () -> ((com.valorsky.skysignals.SkySignalsPlugin) plugin).onReload());
         sender.sendMessage(miniMessage.deserialize(messages.getWithPrefix("reloaded")));
     }
 
@@ -177,8 +179,10 @@ public final class SkySignalsCommand implements TabExecutor {
             sender.sendMessage(miniMessage.deserialize("<red>Cet événement est désactivé.</red>"));
             return;
         }
-        api.getEventManager().startEvent(type, eventContext);
-        sender.sendMessage(miniMessage.deserialize(messages.getWithPrefix("event-started").replace("%event%", type.displayName())));
+        api.getEventManager().startEvent(type, eventContext).whenComplete((value, error) -> {
+            if (error != null) sender.sendMessage(net.kyori.adventure.text.Component.text("Impossible de lancer l'événement : " + error.getMessage()));
+            else sender.sendMessage(miniMessage.deserialize(messages.getWithPrefix("event-started").replace("%event%", type.displayName())));
+        });
     }
 
     private void cmdStop(CommandSender sender, String[] args) {
@@ -194,14 +198,14 @@ public final class SkySignalsCommand implements TabExecutor {
         if (args.length >= 2) {
             try {
                 UUID eventId = UUID.fromString(args[1]);
-                api.getEventManager().cancelEvent(eventId);
+                com.valorsky.skysignals.util.FoliaScheduler.runGlobal(plugin, () -> api.getEventManager().cancelEvent(eventId));
                 sender.sendMessage(miniMessage.deserialize("<green>Événement arrêté.</green>"));
             } catch (IllegalArgumentException e) {
                 sender.sendMessage(miniMessage.deserialize("<red>ID d'événement invalide.</red>"));
             }
         } else {
             for (SkyEvent event : active) {
-                api.getEventManager().cancelEvent(event.getId());
+                com.valorsky.skysignals.util.FoliaScheduler.runGlobal(plugin, () -> api.getEventManager().cancelEvent(event.getId()));
             }
             sender.sendMessage(miniMessage.deserialize(messages.getWithPrefix("event-stopped")));
         }
@@ -256,8 +260,15 @@ public final class SkySignalsCommand implements TabExecutor {
         if (!config.testingVisuals()) {
             sender.sendMessage(miniMessage.deserialize("<yellow>Les tests visuels sont désactivés.</yellow>"));
         }
-        api.getEventManager().startEvent(type, eventContext);
-        sender.sendMessage(miniMessage.deserialize("<green>Test de " + type.displayName() + " lancé (sans récompenses).</green>"));
+        api.getEventManager().createEvent(type, eventContext).thenCompose(event ->
+            com.valorsky.skysignals.util.FoliaScheduler.supplyGlobal(plugin, () -> {
+                ((com.valorsky.skysignals.SkySignalsPlugin) plugin).getRewardService().markTestEvent(event.getId());
+                api.getEventManager().startEvent(event);
+                return event;
+            })).whenComplete((event, error) -> {
+                if (error != null) sender.sendMessage(net.kyori.adventure.text.Component.text("Test impossible : " + error.getMessage()));
+                else sender.sendMessage(net.kyori.adventure.text.Component.text("Test lancé : " + type.displayName() + (config.testingRewards() ? " (récompenses activées)" : " (sans récompenses)")));
+            });
     }
 
     private String formatTime(long seconds) {

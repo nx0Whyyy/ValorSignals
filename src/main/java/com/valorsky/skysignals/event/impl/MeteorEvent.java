@@ -42,7 +42,7 @@ public final class MeteorEvent extends AbstractSkyEvent {
     private final AtomicBoolean hasLanded = new AtomicBoolean(false);
     private final Set<UUID> notifiedPlayers = ConcurrentHashMap.newKeySet();
     private final Set<UUID> rewardedPlayers = ConcurrentHashMap.newKeySet();
-    private String direction;
+    private String direction = "unknown";
 
     public MeteorEvent(EventState state, JavaPlugin plugin, NotificationService notificationService,
                        RewardService rewardService, ParticleService particleService,
@@ -100,48 +100,47 @@ public final class MeteorEvent extends AbstractSkyEvent {
     }
 
     private void findTargetAndPrepare() {
-        World world = getSpawnWorld();
-        if (world == null) {
-            logger.warning("No suitable world for meteor event. Cancelling.");
-            this.status = SkyEventStatus.CANCELLED;
-            return;
-        }
+        locationService.findNearPlayersAsync(10, 30).whenComplete((location, error) -> {
+            if (!plugin.isEnabled()) return;
+            FoliaScheduler.runGlobal(plugin, () -> {
+                if (getStatus() != SkyEventStatus.ANNOUNCING) return;
+                if (error != null || location.isEmpty()) {
+                    logger.warning("No safe loaded location for " + getType());
+                    cancel();
+                    return;
+                }
+                Location loc = location.get();
+                meteorTarget = loc;
 
-        meteorTarget = findTargetPosition(world);
-        if (meteorTarget == null) {
-            logger.warning("Could not find safe position for meteor. Cancelling.");
-            this.status = SkyEventStatus.CANCELLED;
-            return;
-        }
-
-        Player firstPlayer = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
-        direction = PositionUtils.getDirection(firstPlayer, meteorTarget);
-
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            notifiedPlayers.add(player.getUniqueId());
-        }
-
-        notificationService.notifyEventPhase(this, "warning");
-        soundService.playGlobal("meteor_start");
+                notificationService.notifyEventPhase(this, "warning");
+                soundService.playGlobal("meteor_start");
+            });
+        });
     }
+
+    @Override
+    public boolean isReady() { return meteorTarget != null; }
 
     private void startMeteorDescent() {
         if (meteorTarget == null) return;
 
         FoliaScheduler.runRegion(plugin, meteorTarget, () -> {
+            if (cancelled || getStatus() == SkyEventStatus.FINISHED) return;
             meteorStart = meteorTarget.clone().add(0, 80, 0);
             meteorBlock = meteorStart.getWorld().spawnFallingBlock(
                 meteorStart,
                 Material.OBSIDIAN.createBlockData()
             );
+            meteorBlock.setPersistent(false);
             meteorBlock.setDropItem(false);
+            meteorBlock.setCancelDrop(true);
 
             Vector velocity = meteorTarget.toVector().subtract(meteorStart.toVector()).normalize().multiply(1.5);
             meteorBlock.setVelocity(velocity);
 
             soundService.play("meteor_warning", meteorStart, getNearbyPlayers(meteorStart, 48));
 
-            trailTask = FoliaScheduler.runRegionTimer(plugin, meteorStart, () -> {
+            trailTask = FoliaScheduler.runEntityRepeating(plugin, meteorBlock, () -> {
                 if (meteorBlock == null || !meteorBlock.isValid() || hasLanded.get()) {
                     if (trailTask != null) trailTask.cancel();
                     return;
@@ -150,11 +149,11 @@ public final class MeteorEvent extends AbstractSkyEvent {
                 List<Player> audience = getNearbyPlayers(loc, 48);
                 if (!audience.isEmpty()) {
                     MeteorTrailShape trail = new MeteorTrailShape(meteorStart, loc, 10, 1.5);
-                    trail.spawn(loc, Particle.FLAME, 5, 0.01, audience);
+                    particleService.spawnMeteorTrail(meteorStart, loc, Particle.FLAME, 10, 0.01, audience);
                 }
             }, 5L, 2L);
 
-            meteorTask = FoliaScheduler.runRegionTimer(plugin, meteorStart, () -> {
+            meteorTask = FoliaScheduler.runEntityRepeating(plugin, meteorBlock, () -> {
                 if (meteorBlock == null || !meteorBlock.isValid()) {
                     handleImpact();
                     return;
@@ -175,8 +174,12 @@ public final class MeteorEvent extends AbstractSkyEvent {
     }
 
     private void handleImpact() {
-        if (!hasLanded.compareAndSet(false, true)) return;
+        if (meteorTarget == null || !hasLanded.compareAndSet(false, true)) return;
+        FoliaScheduler.runRegion(plugin, meteorTarget, this::applyImpact);
+    }
 
+    private void applyImpact() {
+        if (cancelled) return;
         World world = meteorTarget.getWorld();
         if (world != null) {
             List<Player> audience = getNearbyPlayers(meteorTarget, 48);
@@ -193,7 +196,7 @@ public final class MeteorEvent extends AbstractSkyEvent {
                 world.createExplosion(meteorTarget, 0.0f, false, false);
             }
 
-            for (Player player : Bukkit.getOnlinePlayers()) {
+            for (Player player : world.getPlayers()) {
                 double distance = player.getLocation().distance(meteorTarget);
                 if (distance <= 20) {
                     if (rewardedPlayers.add(player.getUniqueId())) {
@@ -202,40 +205,10 @@ public final class MeteorEvent extends AbstractSkyEvent {
                 }
             }
 
-            createCraterEffect();
+            // Terrain edits are intentionally excluded from the visual impact.
         }
 
         cleanupMeteor();
-    }
-
-    private void createCraterEffect() {
-        if (meteorTarget == null || meteorTarget.getWorld() == null) return;
-
-        World world = meteorTarget.getWorld();
-        List<Block> craterBlocks = new ArrayList<>();
-
-        for (int x = -3; x <= 3; x++) {
-            for (int z = -3; z <= 3; z++) {
-                double dist = Math.sqrt(x * x + z * z);
-                if (dist <= 3) {
-                    Location loc = meteorTarget.clone().add(x, 0, z);
-                    loc.setY(world.getHighestBlockYAt(loc));
-                    Block block = loc.getBlock();
-                    if (block.getType() != Material.AIR) {
-                        craterBlocks.add(block);
-                        block.setType(Material.AIR);
-                    }
-                }
-            }
-        }
-
-        FoliaScheduler.runGlobalDelayed(plugin, () -> {
-            for (Block block : craterBlocks) {
-                if (block.getType() == Material.AIR) {
-                    block.setType(Material.STONE);
-                }
-            }
-        }, 600L);
     }
 
     private List<Player> getNearbyPlayers(Location center, double radius) {
@@ -250,47 +223,15 @@ public final class MeteorEvent extends AbstractSkyEvent {
         return result;
     }
 
-    private World getSpawnWorld() {
-        return Bukkit.getOnlinePlayers().stream()
-            .filter(p -> p.getWorld().getEnvironment() == World.Environment.NORMAL)
-            .map(Player::getWorld)
-            .findFirst()
-            .orElse(Bukkit.getWorld("world"));
-    }
-
-    private Location findTargetPosition(World world) {
-        List<Player> players = new ArrayList<>();
-        for (Player p : Bukkit.getOnlinePlayers()) {
-            if (p.getWorld().equals(world)) players.add(p);
-        }
-        if (players.isEmpty()) return null;
-
-        Player player = players.get(random.nextInt(players.size()));
-        Location island = PositionUtils.findIslandCenter(player);
-        if (island == null) {
-            island = player.getLocation().add(20, 50, 20);
-        }
-
-        for (int attempt = 0; attempt < 10; attempt++) {
-            int offsetX = random.nextInt(30) - 15;
-            int offsetZ = random.nextInt(30) - 15;
-            Location candidate = island.clone().add(offsetX, 0, offsetZ);
-            candidate.setY(world.getHighestBlockYAt(candidate));
-            if (PositionUtils.isSafe(candidate)) {
-                return candidate.add(0.5, 1, 0.5);
-            }
-        }
-        return island.add(0.5, 1, 0.5);
-    }
-
     private boolean isOnGround(Location location) {
         return location.getBlock().getType() != Material.AIR
             || location.clone().subtract(0, 0.1, 0).getBlock().getType() != Material.AIR;
     }
 
     private void cleanupMeteor() {
-        if (meteorBlock != null && meteorBlock.isValid()) {
-            meteorBlock.remove();
+        if (meteorBlock != null) {
+            FallingBlock block = meteorBlock;
+            FoliaScheduler.runEntity(plugin, block, block::remove);
         }
         meteorBlock = null;
         if (meteorTask != null) meteorTask.cancel();

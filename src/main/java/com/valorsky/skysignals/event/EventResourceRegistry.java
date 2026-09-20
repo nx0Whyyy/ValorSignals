@@ -28,11 +28,11 @@ public final class EventResourceRegistry {
     }
 
     public void registerEntity(UUID eventId, Entity entity) {
-        register(eventId, new EntityResource(entity));
+        register(eventId, new EntityResource(entity, plugin));
     }
 
     public void registerBlock(UUID eventId, Location location, BlockData originalData) {
-        register(eventId, new BlockResource(location, originalData));
+        register(eventId, new BlockResource(location, originalData, plugin));
     }
 
     public void registerBossBar(UUID eventId, BossBar bossBar) {
@@ -48,7 +48,7 @@ public final class EventResourceRegistry {
     }
 
     private void register(UUID eventId, Resource resource) {
-        resources.computeIfAbsent(eventId, k -> new ArrayList<>()).add(resource);
+        resources.computeIfAbsent(eventId, k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(resource);
     }
 
     public void cleanup(UUID eventId) {
@@ -74,23 +74,20 @@ public final class EventResourceRegistry {
         void cleanup();
     }
 
-    private record EntityResource(Entity entity) implements Resource {
+    private record EntityResource(Entity entity, JavaPlugin plugin) implements Resource {
         @Override
         public void cleanup() {
             if (entity != null && entity.isValid()) {
-                entity.remove();
+                com.valorsky.skysignals.util.FoliaScheduler.runEntity(plugin, entity, entity::remove);
             }
         }
     }
 
-    private record BlockResource(Location location, BlockData originalData) implements Resource {
+    private record BlockResource(Location location, BlockData originalData, JavaPlugin plugin) implements Resource {
         @Override
         public void cleanup() {
             if (location != null && location.getWorld() != null) {
-                Block block = location.getBlock();
-                if (block.getBlockData() != originalData) {
-                    block.setBlockData(originalData);
-                }
+                com.valorsky.skysignals.util.FoliaScheduler.runRegion(plugin, location, () -> location.getBlock().setBlockData(originalData));
             }
         }
     }

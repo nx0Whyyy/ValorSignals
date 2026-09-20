@@ -24,10 +24,13 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build
-        run: ./gradlew clean build
+        run: ./gradlew clean build dist
 
       - name: Upload JAR
         uses: actions/upload-artifact@v4
         with:
           name: sky-signals
-          path: build/libs/ValorSky-SkySignals-*.jar
+          path: |
+            build/libs/ValorSky-SkySignals-*.jar
+            !build/libs/*-plain.jar
+            build/distributions/ValorSky-SkySignals-*.zip

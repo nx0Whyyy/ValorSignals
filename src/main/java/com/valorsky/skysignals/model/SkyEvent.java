@@ -29,8 +29,11 @@ public interface SkyEvent {
         return Instant.now().isAfter(getEndsAt()) &&
                (getStatus() == SkyEventStatus.ACTIVE ||
                 getStatus() == SkyEventStatus.ANNOUNCING ||
-                getStatus() == SkyEventStatus.WARNING);
+                getStatus() == SkyEventStatus.WARNING ||
+                getStatus() == SkyEventStatus.COMPLETING);
     }
+
+    default boolean isReady() { return true; }
 
     void start();
 

@@ -28,6 +28,17 @@ public final class RewardService {
     private final Config config;
     private final DatabaseManager databaseManager;
     private final Logger logger;
+    private final com.github.benmanes.caffeine.cache.Cache<String, Boolean> claims =
+        com.github.benmanes.caffeine.cache.Caffeine.newBuilder().maximumSize(100000)
+            .expireAfterWrite(java.time.Duration.ofDays(1)).build();
+    private final com.github.benmanes.caffeine.cache.Cache<UUID, Boolean> testEvents =
+        com.github.benmanes.caffeine.cache.Caffeine.newBuilder().maximumSize(10000).expireAfterWrite(java.time.Duration.ofDays(1)).build();
+
+    public boolean rewardsAllowed(UUID eventId) { return testEvents.getIfPresent(eventId) == null || config.testingRewards(); }
+
+    public void markTestEvent(UUID eventId) { testEvents.put(eventId, true); }
+    public void forgetTestEvent(UUID eventId) { testEvents.invalidate(eventId); }
+
 
     public RewardService(JavaPlugin plugin, Config config, DatabaseManager databaseManager) {
         this.plugin = plugin;
@@ -37,65 +48,78 @@ public final class RewardService {
     }
 
     public CompletableFuture<RewardResult> giveRewards(UUID eventId, SkyEventType eventType, UUID playerId, String serverId) {
+        if (!rewardsAllowed(eventId)) {
+            return CompletableFuture.completedFuture(new RewardResult(false, "test_rewards_disabled", List.of()));
+        }
+        String key = eventId + ":" + playerId + ":" + eventType.name();
+        if (claims.asMap().putIfAbsent(key, true) != null) {
+            return CompletableFuture.completedFuture(new RewardResult(false, "already_claimed", List.of()));
+        }
         return CompletableFuture.supplyAsync(() -> {
-            String claimKey = eventId + ":" + playerId + ":" + eventType.name();
-
-            if (hasClaimed(claimKey)) {
-                return new RewardResult(false, "already_claimed", List.of());
+            Player player = Bukkit.getPlayer(playerId);
+            if (player == null || !player.isOnline()) throw new IllegalStateException("player_offline");
+            RewardContext context = new RewardContext(eventId, eventType, playerId, serverId,
+                    System.currentTimeMillis(), buildPlaceholders(eventId, eventType, playerId, serverId));
+            List<RewardType> rewards = buildRewards(eventType, context);
+            if (databaseManager.isConnected() && !reserveClaim(key, context)) {
+                return new PreparedReward(null, List.of());
             }
-
-            try {
-                RewardContext context = new RewardContext(
-                    eventId, eventType, playerId, serverId,
-                    System.currentTimeMillis(), buildPlaceholders(eventId, eventType, playerId, serverId)
-                );
-
-                List<RewardType> rewards = buildRewards(eventType, context);
-                Player player = Bukkit.getPlayer(playerId);
-
-                if (player != null && player.isOnline()) {
-                    FoliaScheduler.runEntity(plugin, player, () -> {
-                        giveMoney(player, context);
-                        runCommands(player, context);
-                        giveItems(player, rewards);
-                    });
-                }
-
-                recordClaim(claimKey);
-                return new RewardResult(true, "success", rewards);
-
-            } catch (Exception e) {
-                logger.severe("Failed to give rewards: " + e.getMessage());
-                return new RewardResult(false, "error: " + e.getMessage(), List.of());
-            }
-        }, databaseManager.asyncExecutor());
+            return new PreparedReward(player, rewards);
+        }, databaseManager.asyncExecutor()).thenCompose(prepared -> {
+            if (prepared.player() == null) return CompletableFuture.completedFuture(
+                    new RewardResult(false, "already_claimed", List.of()));
+            CompletableFuture<Boolean> delivery = new CompletableFuture<>();
+            Runnable retired = () -> delivery.complete(false);
+            var task = prepared.player().getScheduler().run(plugin, t -> {
+                if (!prepared.player().isOnline()) { retired.run(); return; }
+                try {
+                    giveItems(prepared.player(), prepared.rewards());
+                    delivery.complete(true);
+                } catch (Exception e) { delivery.completeExceptionally(e); }
+            }, retired);
+            if (task == null) retired.run();
+            return delivery.thenCompose(delivered -> {
+                if (!delivered) return CompletableFuture.supplyAsync(() -> {
+                    releaseClaim(key);
+                    claims.invalidate(key);
+                    return new RewardResult(false, "player_offline", List.of());
+                }, databaseManager.asyncExecutor());
+                return FoliaScheduler.supplyGlobal(plugin, () -> {
+                    giveMoney(prepared.player(), prepared.rewards());
+                    runCommands(prepared.player(), prepared.rewards());
+                    return new RewardResult(true, "success", prepared.rewards());
+                });
+            });
+        }).exceptionally(error -> {
+            logger.warning("Reward delivery failed for " + key + ": " + error.getMessage());
+            if (error.getCause() instanceof IllegalStateException && ("player_offline".equals(error.getCause().getMessage()) || "Cannot reserve reward claim".equals(error.getCause().getMessage()))) claims.invalidate(key);
+            return new RewardResult(false, "delivery_failed", List.of());
+        });
     }
 
-    private boolean hasClaimed(String claimKey) {
-        try (Connection conn = databaseManager.getDataSource().getConnection();
-             PreparedStatement stmt = conn.prepareStatement(
-                 "SELECT 1 FROM sky_signals_rewards WHERE claim_key = ?"
-             )) {
-            stmt.setString(1, claimKey);
-            try (ResultSet rs = stmt.executeQuery()) {
-                return rs.next();
-            }
-        } catch (Exception e) {
-            logger.warning("Failed to check reward claim: " + e.getMessage());
-            return false;
-        }
+    private record PreparedReward(Player player, List<RewardType> rewards) {}
+
+    private boolean reserveClaim(String key, RewardContext context) {
+        try (Connection connection = databaseManager.getDataSource().getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "INSERT IGNORE INTO sky_signals_rewards (claim_key, event_id, player_uuid, event_type, reward_type, reward_data) VALUES (?, ?, ?, ?, ?, ?)")) {
+            statement.setString(1, key);
+            statement.setString(2, context.eventId().toString());
+            statement.setString(3, context.playerId().toString());
+            statement.setString(4, context.eventType().name());
+            statement.setString(5, "BUNDLE");
+            statement.setString(6, "{}");
+            return statement.executeUpdate() == 1;
+        } catch (java.sql.SQLException e) { throw new IllegalStateException("Cannot reserve reward claim", e); }
     }
 
-    private void recordClaim(String claimKey) {
-        try (Connection conn = databaseManager.getDataSource().getConnection();
-             PreparedStatement stmt = conn.prepareStatement(
-                 "INSERT IGNORE INTO sky_signals_rewards (claim_key, claimed_at) VALUES (?, NOW())"
-             )) {
-            stmt.setString(1, claimKey);
-            stmt.executeUpdate();
-        } catch (Exception e) {
-            logger.warning("Failed to record reward claim: " + e.getMessage());
-        }
+    private void releaseClaim(String key) {
+        if (!databaseManager.isConnected()) return;
+        try (Connection connection = databaseManager.getDataSource().getConnection();
+             PreparedStatement statement = connection.prepareStatement("DELETE FROM sky_signals_rewards WHERE claim_key = ?")) {
+            statement.setString(1, key);
+            statement.executeUpdate();
+        } catch (java.sql.SQLException e) { logger.warning("Cannot release offline claim: " + e.getMessage()); }
     }
 
     private Map<String, String> buildPlaceholders(UUID eventId, SkyEventType eventType, UUID playerId, String serverId) {
@@ -148,8 +172,8 @@ public final class RewardService {
         return rewards;
     }
 
-    private void giveMoney(Player player, RewardContext context) {
-        for (RewardType reward : buildRewards(context.eventType(), context)) {
+    private void giveMoney(Player player, List<RewardType> rewards) {
+        for (RewardType reward : rewards) {
             if (reward instanceof MoneyReward mr) {
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
                     "eco give " + player.getName() + " " + (long) mr.amount());
@@ -157,8 +181,8 @@ public final class RewardService {
         }
     }
 
-    private void runCommands(Player player, RewardContext context) {
-        for (RewardType reward : buildRewards(context.eventType(), context)) {
+    private void runCommands(Player player, List<RewardType> rewards) {
+        for (RewardType reward : rewards) {
             if (reward instanceof CommandReward cr) {
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cr.command());
             }
@@ -176,7 +200,7 @@ public final class RewardService {
                         stack.setItemMeta(meta);
                     }
                 }
-                player.getInventory().addItem(stack);
+                player.getInventory().addItem(stack).values().forEach(leftover -> player.getWorld().dropItemNaturally(player.getLocation(), leftover));
             }
         }
     }

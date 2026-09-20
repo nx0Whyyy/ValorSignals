@@ -31,7 +31,7 @@ public final class EventPublisher {
 
     public void publish(String routingKey, EventState state) {
         if (!rabbitManager.isConnected()) {
-            logger.warning("RabbitMQ not connected, cannot publish " + routingKey);
+            logger.fine("RabbitMQ not connected, cannot publish " + routingKey);
             return;
         }
         FoliaScheduler.runAsync(plugin, () -> {
@@ -39,6 +39,7 @@ public final class EventPublisher {
                 String message = gson.toJson(state);
                 Channel channel = rabbitManager.getChannel();
                 if (channel != null && channel.isOpen()) {
+                    synchronized (channel) {
                     channel.basicPublish(
                             rabbitManager.getExchange(),
                             routingKey,
@@ -46,8 +47,9 @@ public final class EventPublisher {
                                     .contentType("application/json")
                                     .deliveryMode(2)
                                     .build(),
-                            message.getBytes()
+                            message.getBytes(java.nio.charset.StandardCharsets.UTF_8)
                     );
+                    }
                 }
             } catch (Exception e) {
                 logger.warning("Failed to publish RabbitMQ message: " + e.getMessage());

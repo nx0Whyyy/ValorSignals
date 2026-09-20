@@ -95,38 +95,27 @@ public final class GrowthBoostEvent extends AbstractSkyEvent implements Listener
     }
 
     private void showVisualEffects() {
-        // Find random crops in loaded chunks and show particles
-        for (World world : Bukkit.getWorlds()) {
-            if (world.getEnvironment() != World.Environment.NORMAL) continue;
-
-            List<Player> players = world.getPlayers();
-            if (players.isEmpty()) continue;
-
-            for (Player player : players) {
-                Location loc = player.getLocation();
-                // Scan nearby blocks for crops
+        long now = System.currentTimeMillis();
+        lastVisual.entrySet().removeIf(entry -> now - entry.getValue() > Math.max(1000, visualCooldown * 50L));
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            FoliaScheduler.runEntity(plugin, player, () -> {
+                if (getStatus() != SkyEventStatus.ACTIVE) return;
+                Location center = player.getLocation();
                 for (int x = -10; x <= 10; x++) {
                     for (int z = -10; z <= 10; z++) {
-                        Block block = world.getBlockAt(loc.getBlockX() + x, loc.getBlockY(), loc.getBlockZ() + z);
-                        if (isGrowable(block)) {
-                            Location blockLoc = block.getLocation();
-                            Long last = lastVisual.get(blockLoc);
-                            long now = System.currentTimeMillis();
-                            if (last == null || now - last > visualCooldown * 50L) {
-                                lastVisual.put(blockLoc, now);
-                                List<Player> audience = getNearbyPlayers(blockLoc, 32);
-                                if (!audience.isEmpty()) {
-                                    particleService.spawnCircle(blockLoc, Particle.HAPPY_VILLAGER, 2, 5, 0.05, audience);
-                                }
-                            }
+                        Location loc = center.clone().add(x, 0, z);
+                        // Do not read or load a neighbouring region from the player's thread.
+                        if (!Bukkit.isOwnedByCurrentRegion(loc) || !loc.getWorld().isChunkLoaded(loc.getBlockX() >> 4, loc.getBlockZ() >> 4)) continue;
+                        if (isGrowable(loc.getBlock())) {
+                            particleService.spawnCircle(loc, Particle.HAPPY_VILLAGER, 2, 5, 0.05, List.of(player));
                         }
                     }
                 }
-            }
+            });
         }
     }
 
-    @EventHandler
+    @EventHandler(ignoreCancelled = true)
     public void onBlockGrow(BlockGrowEvent event) {
         if (getStatus() != SkyEventStatus.ACTIVE) return;
 
@@ -134,14 +123,14 @@ public final class GrowthBoostEvent extends AbstractSkyEvent implements Listener
         if (!isGrowable(block)) return;
 
         // Apply growth boost by advancing age multiple times
-        if (block.getBlockData() instanceof Ageable ageable) {
+        if (event.getNewState().getBlockData() instanceof Ageable ageable) {
             int maxAge = ageable.getMaximumAge();
             int currentAge = ageable.getAge();
-            int newAge = Math.min(maxAge, currentAge + (int) Math.ceil(multiplier));
+            int newAge = Math.min(maxAge, currentAge + Math.max(0, (int) Math.ceil(multiplier) - 1));
 
             if (newAge > currentAge) {
                 ageable.setAge(newAge);
-                block.setBlockData(ageable);
+                event.getNewState().setBlockData(ageable);
 
                 // Visual feedback
                 Location loc = block.getLocation();
@@ -193,6 +182,7 @@ public final class GrowthBoostEvent extends AbstractSkyEvent implements Listener
     public void stop() {
         if (visualTask != null) visualTask.cancel();
         HandlerList.unregisterAll(this);
+        lastVisual.clear();
     }
 
     @Override

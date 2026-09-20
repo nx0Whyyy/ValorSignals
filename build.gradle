@@ -18,7 +18,7 @@ plugins {
 }
 
 group = 'com.valorsky'
-version = '2.0.1'
+version = '2.0.2'
 description = 'Dynamic celestial events for ValorSky'
 
 java {
@@ -58,6 +58,7 @@ dependencies {
     implementation "io.lettuce:lettuce-core:${lettuceVersion}"
     implementation "com.rabbitmq:amqp-client:${rabbitVersion}"
     implementation "com.zaxxer:HikariCP:${hikariVersion}"
+    implementation "com.mysql:mysql-connector-j:9.2.0"
     implementation "com.google.code.gson:gson:${gsonVersion}"
 
     testImplementation "io.papermc.paper:paper-api:${paperVersion}"
@@ -84,6 +85,10 @@ configurations {
     }
 }
 
+jar {
+    archiveClassifier = "plain"
+}
+
 shadowJar {
     archiveFileName = "ValorSky-SkySignals-${version}.jar"
     destinationDirectory = file('build/libs')
@@ -96,7 +101,12 @@ shadowJar {
     exclude 'META-INF/maven/**'
 }
 
-build.finalizedBy(shadowJar)
+build.dependsOn(shadowJar)
+
+processResources {
+    inputs.property("version", project.version)
+    filesMatching("plugin.yml") { expand(version: project.version) }
+}
 
 tasks.register('dist', Zip) {
     group = 'build'
@@ -108,8 +118,9 @@ tasks.register('dist', Zip) {
         rename { "ValorSky-SkySignals-${version}.jar" }
         into('plugins/')
     }
-    from(sourceSets.main.resources) {
-        into('plugins/')
+    from('src/main/resources') {
+        include 'config.yml', 'messages.yml'
+        into('plugins/ValorSky-SkySignals/')
     }
     dependsOn(shadowJar)
 }

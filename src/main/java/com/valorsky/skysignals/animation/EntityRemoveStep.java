@@ -10,7 +10,7 @@ public record EntityRemoveStep(
     @Override
     public void execute(AnimationContext context) {
         if (entity != null && entity.isValid()) {
-            entity.remove();
+            com.valorsky.skysignals.util.FoliaScheduler.runEntity(context.getSequence().getPlugin(), entity, entity::remove);
         }
     }
 }

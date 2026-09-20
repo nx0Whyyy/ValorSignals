@@ -97,7 +97,7 @@ public final class SkySignalsPlugin extends JavaPlugin {
         databaseManager.connect();
 
         EventRepository eventRepository = new EventRepository(
-                databaseManager.getDataSource(),
+                databaseManager::getDataSource,
                 getLogger()
         );
 
@@ -148,21 +148,20 @@ public final class SkySignalsPlugin extends JavaPlugin {
 
         eventConsumer = new EventConsumer(rabbitManager, config, getLogger(), eventManager, this);
 
+        rabbitManager.onConnected(eventConsumer::startConsuming);
         eventManager.initialize();
 
-        if (redisService.isConnected()) {
+        {
             redisService.addListener(state -> {
                 FoliaScheduler.runGlobal(this, () -> {
                     switch (state.status()) {
-                        case ACTIVE -> eventManager.handleEventStarted(state);
+                        case ANNOUNCING, WARNING, ACTIVE, COMPLETING -> eventManager.handleEventStarted(state);
                         case FINISHED, CANCELLED -> eventManager.handleEventFinished(state);
                     }
                 });
             });
-            getLogger().info("Redis: connected - distributed locking enabled.");
-        } else {
-            getLogger().info("Redis: unavailable - distributed locking disabled.");
         }
+        getLogger().info(redisService.isConnected() ? "Redis connected." : "Redis unavailable: using local scheduling.");
 
         if (rabbitManager.isConnected()) {
             eventConsumer.startConsuming();
@@ -222,22 +221,27 @@ public final class SkySignalsPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        if (scheduler != null) scheduler.stop();
-        if (eventManager != null) eventManager.shutdown();
-        if (notificationService != null) notificationService.cleanup();
-        if (lockService != null) lockService.shutdown();
-        if (redisService != null) redisService.disconnect();
-        if (rabbitManager != null) rabbitManager.disconnect();
-        if (databaseManager != null) databaseManager.disconnect();
-
+        cleanup("scheduler", () -> { if (scheduler != null) scheduler.stop(); });
+        cleanup("events", () -> { if (eventManager != null) eventManager.shutdown(); });
+        cleanup("notifications", () -> { if (notificationService != null) notificationService.cleanup(); });
+        cleanup("locks", () -> { if (lockService != null) lockService.shutdown(); });
+        cleanup("Redis", () -> { if (redisService != null) redisService.disconnect(); });
+        cleanup("RabbitMQ", () -> { if (rabbitManager != null) rabbitManager.disconnect(); });
+        cleanup("database", () -> { if (databaseManager != null) databaseManager.disconnect(); });
+        org.bukkit.Bukkit.getGlobalRegionScheduler().cancelTasks(this);
+        org.bukkit.Bukkit.getAsyncScheduler().cancelTasks(this);
         getLogger().info("Plugin disabled.");
+    }
+
+    private void cleanup(String service, Runnable action) {
+        try { action.run(); }
+        catch (Exception e) { getLogger().log(java.util.logging.Level.WARNING, "Failed to stop " + service, e); }
     }
 
     public void onReload() {
         if (configManager != null) configManager.reload();
-        if (messageConfig != null) messageConfig.reload();
-        if (scheduler != null) scheduler.reload();
         if (eventManager != null) eventManager.reload();
+        if (scheduler != null) scheduler.reload();
         getLogger().info("Plugin reloaded.");
     }
 

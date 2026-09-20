@@ -23,7 +23,8 @@ public final class SignalScheduler {
     private final EventContext eventContext;
     private final Logger logger;
     private final Random random = new Random();
-    private boolean schedulerTaskRunning = false;
+    private FoliaScheduler.TaskHandle pendingTask;
+    private long generation;
     private final Map<SkyEventType, Instant> lastEventTime = new ConcurrentHashMap<>();
     private Instant lastGlobalEvent = Instant.now().minusSeconds(3600);
     private boolean running = false;
@@ -48,6 +49,7 @@ public final class SignalScheduler {
             logger.info("Scheduler disabled in configuration.");
             return;
         }
+        if (running) return;
         running = true;
         scheduleNextEvent();
         logger.info("Signal scheduler started with weights and cooldowns.");
@@ -60,8 +62,8 @@ public final class SignalScheduler {
         int maxInterval = config.schedulerMaxInterval();
         int delay = minInterval + random.nextInt(maxInterval - minInterval + 1);
 
-        schedulerTaskRunning = true;
-        FoliaScheduler.runGlobalDelayed(plugin, this::tryTriggerEvent, delay * 20L);
+        if (pendingTask != null) pendingTask.cancel();
+        pendingTask = FoliaScheduler.runGlobalDelayed(plugin, this::tryTriggerEvent, delay * 20L);
         logger.info("Next SkySignal check in " + delay + " seconds.");
     }
 
@@ -106,36 +108,28 @@ public final class SignalScheduler {
         String lockName = "scheduler:" + selected.name().toLowerCase();
         String ownerId = config.serverId() + ":" + System.currentTimeMillis();
 
-        lockService.tryLock(lockName, java.time.Duration.ofSeconds(30), ownerId)
-            .thenAccept(acquired -> {
-                if (!acquired) {
-                    logger.info("Could not acquire lock for " + selected + ", another server got it.");
-                    scheduleNextEvent();
-                    return;
-                }
-
-                // Double-check after acquiring lock
-                if (!canStartEvent(selected)) {
-                    lockService.releaseLock(lockName, ownerId).join();
-                    scheduleNextEvent();
-                    return;
-                }
-
-                // Start the event
+        long currentGeneration = generation;
+        CompletableFuture<Boolean> lock = lockService.isEnabled()
+                ? lockService.tryLock(lockName, java.time.Duration.ofSeconds(30), ownerId)
+                : CompletableFuture.completedFuture(true);
+        lock.thenCompose(acquired -> FoliaScheduler.supplyGlobal(plugin, () -> {
+            if (!running || generation != currentGeneration || !acquired || !canStartEvent(selected)) return false;
+            return true;
+        })).thenCompose(allowedNow -> allowedNow
+                ? eventManager.startEvent(selected, eventContext).thenApply(v -> true)
+                : CompletableFuture.completedFuture(false))
+            .whenComplete((started, error) -> {
+                if (lockService.isEnabled()) lockService.releaseLock(lockName, ownerId);
+                if (!plugin.isEnabled()) return;
                 FoliaScheduler.runGlobal(plugin, () -> {
-                    eventManager.startEvent(selected, eventContext);
-                    lastGlobalEvent = Instant.now();
-                    lastEventTime.put(selected, Instant.now());
-                    logger.info("Event started via scheduler: " + selected);
+                    if (!running || generation != currentGeneration) return;
+                    if (error != null) logger.warning("Unable to start event: " + error.getMessage());
+                    if (Boolean.TRUE.equals(started)) {
+                        lastGlobalEvent = Instant.now();
+                        lastEventTime.put(selected, lastGlobalEvent);
+                    }
+                    scheduleNextEvent();
                 });
-
-                lockService.releaseLock(lockName, ownerId).join();
-                scheduleNextEvent();
-            })
-            .exceptionally(ex -> {
-                logger.warning("Scheduler lock error: " + ex.getMessage());
-                scheduleNextEvent();
-                return null;
             });
     }
 
@@ -150,6 +144,8 @@ public final class SignalScheduler {
         if (!config.eventsAllowConcurrent() && eventManager.isEventActive()) {
             return false;
         }
+
+        if (eventManager.getActiveEvents().size() >= config.eventsMaxActive()) return false;
 
         // Check event conflicts
         Map<SkyEventType, Set<SkyEventType>> conflicts = config.getEventConflicts();
@@ -197,7 +193,9 @@ public final class SignalScheduler {
 
     public void stop() {
         running = false;
-        schedulerTaskRunning = false;
+        generation++;
+        if (pendingTask != null) pendingTask.cancel();
+        pendingTask = null;
     }
 
     public void reload() {

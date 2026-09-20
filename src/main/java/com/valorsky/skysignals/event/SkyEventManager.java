@@ -36,7 +36,7 @@ public class SkyEventManager {
     private final Map<UUID, SkyEvent> activeEvents = new ConcurrentHashMap<>();
     private final Map<UUID, SkyEventPhase> eventPhases = new ConcurrentHashMap<>();
     private FoliaScheduler.TaskHandle tickTask;
-    private boolean initialized = false;
+    private volatile boolean initialized = false;
 
     public SkyEventManager(
             JavaPlugin plugin,
@@ -85,6 +85,10 @@ public class SkyEventManager {
 
         for (SkyEvent event : toProcess) {
             try {
+                if (event.getStatus() == SkyEventStatus.CANCELLED || event.getStatus() == SkyEventStatus.FINISHED) {
+                    finishEvent(event, event.getStatus() == SkyEventStatus.FINISHED);
+                    continue;
+                }
                 if (event.getStatus() == SkyEventStatus.ACTIVE ||
                     event.getStatus() == SkyEventStatus.ANNOUNCING ||
                     event.getStatus() == SkyEventStatus.WARNING ||
@@ -92,6 +96,14 @@ public class SkyEventManager {
 
                     long elapsed = now.getEpochSecond() - event.getStartedAt().getEpochSecond();
                     event.tick(elapsed);
+                    long warning = Math.max(1, config.getEventWarningDuration(event.getType()));
+                    if (event.getPhase() == SkyEventPhase.ANNOUNCING && event.isReady() && elapsed >= 1) {
+                        transitionPhase(event, SkyEventPhase.WARNING);
+                    } else if (event.getPhase() == SkyEventPhase.WARNING && elapsed >= warning + 1) {
+                        transitionPhase(event, SkyEventPhase.ACTIVE);
+                    } else if (event.getPhase() == SkyEventPhase.ACTIVE && event.getSecondsRemaining() <= 10) {
+                        transitionPhase(event, SkyEventPhase.COMPLETING);
+                    }
 
                     if (event.isExpired()) {
                         FoliaScheduler.runGlobal(plugin, () -> finishEvent(event, true));
@@ -109,7 +121,7 @@ public class SkyEventManager {
     }
 
     public CompletableFuture<SkyEvent> createEvent(SkyEventType type, String serverId, EventContext context) {
-        return CompletableFuture.supplyAsync(() -> {
+        return FoliaScheduler.supplyGlobal(plugin, () -> {
             try {
                 if (!factory.isRegistered(type)) {
                     throw new IllegalArgumentException("Event type not registered: " + type);
@@ -144,9 +156,12 @@ public class SkyEventManager {
     }
 
     public void startEvent(SkyEvent event) {
-        if (!activeEvents.containsKey(event.getId())) {
-            activeEvents.put(event.getId(), event);
+        if (!initialized) throw new IllegalStateException("Event manager is stopped");
+        if (activeEvents.containsKey(event.getId())) return;
+        if (!canStartNewEvent() || isEventTypeActive(event.getType())) {
+            throw new IllegalStateException("Event limit reached");
         }
+        activeEvents.put(event.getId(), event);
 
         Instant now = Instant.now();
         EventState state = toState(event, SkyEventStatus.ANNOUNCING, SkyEventPhase.ANNOUNCING, 0);
@@ -168,12 +183,14 @@ public class SkyEventManager {
 
     public CompletableFuture<Void> startEvent(SkyEventType type, EventContext context) {
         return createEvent(type, context)
-            .thenCompose(event -> CompletableFuture.runAsync(() ->
-                FoliaScheduler.runGlobal(plugin, () -> startEvent(event))
-            ));
+            .thenCompose(event -> FoliaScheduler.supplyGlobal(plugin, () -> {
+                startEvent(event);
+                return null;
+            }));
     }
 
     public void transitionPhase(SkyEvent event, SkyEventPhase newPhase) {
+        if (!activeEvents.containsKey(event.getId()) || event.getPhase() == newPhase) return;
         eventPhases.put(event.getId(), newPhase);
         event.onPhaseChange(newPhase);
 
@@ -209,17 +226,16 @@ public class SkyEventManager {
     }
 
     public void finishEvent(SkyEvent event, boolean natural) {
-        if (event.getStatus() == SkyEventStatus.FINISHED || event.getStatus() == SkyEventStatus.CANCELLED) {
-            return;
-        }
-
-        activeEvents.remove(event.getId());
+        if (activeEvents.remove(event.getId()) == null) return;
+        eventPhases.remove(event.getId());
+        SkyEventStatus terminal = natural ? SkyEventStatus.FINISHED : SkyEventStatus.CANCELLED;
+        event.onPhaseChange(natural ? SkyEventPhase.FINISHED : SkyEventPhase.CANCELLED);
         resourceRegistry.cleanup(event.getId());
 
         event.stop();
 
         Instant now = Instant.now();
-        EventState state = toState(event, SkyEventStatus.FINISHED, SkyEventPhase.FINISHED,
+        EventState state = toState(event, terminal, natural ? SkyEventPhase.FINISHED : SkyEventPhase.CANCELLED,
             now.getEpochSecond() - event.getStartedAt().getEpochSecond());
 
         cache.put(state.id().toString(), state);
@@ -227,10 +243,10 @@ public class SkyEventManager {
         if (redisService != null && redisService.isConnected()) {
             redisService.removeEventState(state.id().toString());
         }
-        eventRepository.updateEventStatus(state.id(), SkyEventStatus.FINISHED, now);
+        eventRepository.updateEventStatus(state.id(), terminal, now);
 
         notificationService.notifyEventEnd(event);
-        eventPublisher.publish("event.finished", state);
+        eventPublisher.publish(natural ? "event.finished" : "event.cancelled", state);
 
         String suffix = natural ? "finished" : "cancelled";
         logger.info("Event " + suffix + ": " + event.getType() + " [" + event.getId() + "]");
@@ -302,11 +318,7 @@ public class SkyEventManager {
     public void handleEventStarted(EventState state) {
         FoliaScheduler.runGlobal(plugin, () -> {
             if (activeEvents.containsKey(state.id())) return;
-             SkyEvent event = factory.createFromState(state, eventContext);
-            activeEvents.put(state.id(), event);
-            localCache.put(event);
             cache.put(state.id().toString(), state);
-            notificationService.notifyEventStart(event);
             logger.info("Event synchronized from network: " + state.type() + " [" + state.id() + "]");
         });
     }
@@ -360,7 +372,7 @@ public class SkyEventManager {
                         logger.info("Expired event cleaned up: " + state.type() + " [" + state.id() + "]");
                     } else {
                         SkyEvent event = factory.createFromState(state, eventContext);
-                        event.start();
+                        event.onPhaseChange(SkyEventPhase.ANNOUNCING);
                         activeEvents.put(state.id(), event);
                         localCache.put(event);
                         cache.put(state.id().toString(), state);
@@ -377,8 +389,10 @@ public class SkyEventManager {
         if (tickTask != null) {
             tickTask.cancel();
         }
+        initialized = false;
         for (SkyEvent event : new ArrayList<>(activeEvents.values())) {
-            finishEvent(event, false);
+            try { finishEvent(event, false); }
+            catch (Exception e) { logger.log(java.util.logging.Level.WARNING, "Failed to clean event " + event.getId(), e); }
         }
         resourceRegistry.cleanupAll();
         activeEvents.clear();
@@ -392,6 +406,7 @@ public class SkyEventManager {
         shutdown();
         restoreEventsFromRedis();
         startTickTask();
+        initialized = true;
     }
 
     public Set<SkyEventType> getRegisteredEventTypes() {

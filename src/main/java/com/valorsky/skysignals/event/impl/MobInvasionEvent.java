@@ -39,7 +39,7 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
     private final Logger logger;
 
     private Location spawnCenter;
-    private final List<LivingEntity> spawnedMobs = Collections.synchronizedList(new ArrayList<>());
+    private final List<LivingEntity> spawnedMobs = new java.util.concurrent.CopyOnWriteArrayList<>();
     private TaskHandle waveTask;
     private TaskHandle checkTask;
     private final AtomicInteger currentWave = new AtomicInteger(0);
@@ -103,18 +103,26 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
     }
 
     private void findSpawnLocation() {
-        Player firstPlayer = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
-        Location playerLoc = firstPlayer != null ? firstPlayer.getLocation() : null;
+        locationService.findNearPlayersAsync(30, 100).whenComplete((location, error) -> {
+            if (!plugin.isEnabled()) return;
+            FoliaScheduler.runGlobal(plugin, () -> {
+                if (getStatus() != SkyEventStatus.ANNOUNCING) return;
+                if (error != null || location.isEmpty()) {
+                    logger.warning("No safe loaded location for " + getType());
+                    cancel();
+                    return;
+                }
+                Location loc = location.get();
+                spawnCenter = loc;
 
-        locationService.findSafeLocation(playerLoc, 30, 100).ifPresentOrElse(loc -> {
-            spawnCenter = loc;
-            notificationService.notifyEventPhase(this, "start");
-            soundService.playGlobal("mob_invasion_start");
-        }, () -> {
-            logger.warning("Could not find safe location for mob invasion. Cancelling.");
-            this.status = SkyEventStatus.CANCELLED;
+                notificationService.notifyEventPhase(this, "start");
+                soundService.playGlobal("mob_invasion_start");
+            });
         });
     }
+
+    @Override
+    public boolean isReady() { return spawnCenter != null; }
 
     private void startFirstWave() {
         currentWave.set(0);
@@ -122,6 +130,7 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
     }
 
     private void spawnWave(int waveIndex) {
+        if (cancelled || (getStatus() == SkyEventStatus.FINISHED || getStatus() == SkyEventStatus.COMPLETING)) return;
         if (waveIndex >= waves.length) {
             checkTask = FoliaScheduler.runGlobalTimer(plugin, this::checkMobsRemaining, 20L, 20L);
             return;
@@ -130,13 +139,14 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
         Config.MobWaveConfig wave = waves[waveIndex];
         currentWave.set(waveIndex + 1);
         int totalThisWave = wave.mobs().values().stream().mapToInt(Integer::intValue).sum();
-        mobsRemaining.addAndGet(totalThisWave);
+
 
         notificationService.notifyEventPhase(this, "wave");
         soundService.playGlobal("mob_invasion_wave");
 
         int delay = wave.delay() * 20;
-        FoliaScheduler.runGlobalDelayed(plugin, () -> {
+        waveTask = FoliaScheduler.runGlobalDelayed(plugin, () -> {
+            if (cancelled || (getStatus() == SkyEventStatus.FINISHED || getStatus() == SkyEventStatus.COMPLETING)) return;
             for (Map.Entry<String, Integer> entry : wave.mobs().entrySet()) {
                 String mobType = entry.getKey();
                 int count = entry.getValue();
@@ -145,10 +155,7 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
                 }
             }
 
-            if (waveIndex + 1 < waves.length) {
-                int nextDelay = waves[waveIndex + 1].delay() * 20;
-                FoliaScheduler.runGlobalDelayed(plugin, () -> spawnWave(waveIndex + 1), nextDelay);
-            }
+            spawnWave(waveIndex + 1);
         }, delay);
     }
 
@@ -157,7 +164,9 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
         if (spawnedMobs.size() >= maxMobs) return;
 
         World world = spawnCenter.getWorld();
-        EntityType type = EntityType.fromName(mobType);
+        EntityType type;
+        try { type = EntityType.valueOf(mobType.toUpperCase(Locale.ROOT)); }
+        catch (IllegalArgumentException e) { logger.warning("Invalid mob type: " + mobType); return; }
         if (type == null || !type.isAlive()) {
             logger.warning("Invalid mob type: " + mobType);
             return;
@@ -168,9 +177,15 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
         Location spawnLoc = spawnCenter.clone().add(
             distance * Math.cos(angle), 0, distance * Math.sin(angle)
         );
+        if (mobsRemaining.incrementAndGet() > maxMobs) { mobsRemaining.decrementAndGet(); return; }
+        FoliaScheduler.runRegion(plugin, spawnLoc, () -> {
+        if (cancelled || (getStatus() == SkyEventStatus.FINISHED || getStatus() == SkyEventStatus.COMPLETING) || !world.isChunkLoaded(spawnLoc.getBlockX() >> 4, spawnLoc.getBlockZ() >> 4)) {
+            mobsRemaining.decrementAndGet(); return;
+        }
         spawnLoc.setY(world.getHighestBlockYAt(spawnLoc) + 1);
 
         LivingEntity mob = (LivingEntity) world.spawnEntity(spawnLoc, type);
+        mob.setPersistent(false);
 
         PersistentDataContainer pdc = mob.getPersistentDataContainer();
         pdc.set(new NamespacedKey(plugin, "skysignals_event"), PersistentDataType.STRING, id.toString());
@@ -188,6 +203,7 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
         if (!audience.isEmpty()) {
             particleService.spawnCircle(spawnLoc, Particle.SOUL_FIRE_FLAME, 2, 10, 0.1, audience);
         }
+        });
     }
 
     private void checkMobsRemaining() {
@@ -201,8 +217,8 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
         if (alive == 0) {
             if (checkTask != null) checkTask.cancel();
             FoliaScheduler.runGlobalDelayed(plugin, () -> {
-                SkyEventManager em = (SkyEventManager) plugin.getServer().getPluginManager().getPlugin("SkySignals");
-                if (em != null) em.transitionPhase(this, SkyEventPhase.COMPLETING);
+                if (!cancelled && getStatus() != SkyEventStatus.FINISHED)
+                    ((com.valorsky.skysignals.SkySignalsPlugin) plugin).getApi().getEventManager().transitionPhase(this, SkyEventPhase.COMPLETING);
             }, 20L);
         }
     }
@@ -219,9 +235,7 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
 
     private void cleanupMobs() {
         for (LivingEntity mob : spawnedMobs) {
-            if (mob != null && mob.isValid() && !mob.isDead()) {
-                mob.remove();
-            }
+            if (mob != null) FoliaScheduler.runEntity(plugin, mob, mob::remove);
         }
         spawnedMobs.clear();
         if (waveTask != null) waveTask.cancel();

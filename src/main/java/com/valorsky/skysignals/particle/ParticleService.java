@@ -23,20 +23,35 @@ public final class ParticleService {
         this.logger = plugin.getLogger();
     }
 
+    private synchronized boolean reserve(int count) {
+        long second = System.currentTimeMillis() / 1000;
+        if (second != lastSecond) { lastSecond = second; particlesThisSecond = 0; }
+        if (particlesThisSecond + count > config.maxParticlesPerSecond()) return false;
+        particlesThisSecond += count;
+        return true;
+    }
+
+    private void emit(Location location, Particle particle, int count, double speed, List<Player> audience) {
+        if (!config.visualsEnabled() || !config.particlesEnabled() || count <= 0) return;
+        for (Player player : audience) {
+            com.valorsky.skysignals.util.FoliaScheduler.runEntity(plugin, player, () -> {
+                if (player.getWorld().equals(location.getWorld()) &&
+                        player.getLocation().distanceSquared(location) <= (double) config.viewDistance() * config.viewDistance() && reserve(count)) {
+                    player.spawnParticle(particle, location, count, 0, 0, 0, speed);
+                }
+            });
+        }
+    }
+
     public void spawnCircle(Location center, Particle particle, double radius, int count, double speed, List<Player> audience) {
-        int points = (int) (radius * 3);
+        int points = Math.max(1, (int) (radius * 3));
         for (int i = 0; i < points; i++) {
             double angle = 2 * Math.PI * i / points;
             double x = center.getX() + radius * Math.cos(angle);
             double z = center.getZ() + radius * Math.sin(angle);
             Location loc = new Location(center.getWorld(), x, center.getY(), z);
 
-            for (Player player : audience) {
-                if (player.getWorld().equals(loc.getWorld()) &&
-                    player.getLocation().distanceSquared(loc) <= config.viewDistance() * config.viewDistance()) {
-                    player.spawnParticle(particle, loc, count / points, 0, 0, 0, speed);
-                }
-            }
+            emit(loc, particle, Math.max(1, count / points), speed, audience);
         }
     }
 
@@ -56,12 +71,7 @@ public final class ParticleService {
                 double z = center.getZ() + radius * Math.sin(angle);
                 Location loc = new Location(center.getWorld(), x, y, z);
 
-                for (Player player : audience) {
-                    if (player.getWorld().equals(loc.getWorld()) &&
-                        player.getLocation().distanceSquared(loc) <= config.viewDistance() * config.viewDistance()) {
-                        player.spawnParticle(particle, loc, count / (turns * pointsPerTurn), 0, 0, 0, speed);
-                    }
-                }
+                emit(loc, particle, Math.max(1, count / (turns * pointsPerTurn)), speed, audience);
             }
         }
     }
@@ -76,12 +86,7 @@ public final class ParticleService {
                 double z = center.getZ() + radius * Math.sin(angle);
                 Location loc = new Location(center.getWorld(), x, center.getY(), z);
 
-                for (Player player : audience) {
-                    if (player.getWorld().equals(loc.getWorld()) &&
-                        player.getLocation().distanceSquared(loc) <= config.viewDistance() * config.viewDistance()) {
-                        player.spawnParticle(particle, loc, count / (points * 2), 0, 0, 0, speed);
-                    }
-                }
+                emit(loc, particle, Math.max(1, count / (points * 2)), speed, audience);
             }
         }
     }
@@ -98,12 +103,7 @@ public final class ParticleService {
             double progress = (i + 0.5) / points;
             Location loc = start.clone().add(dx * progress, dy * progress, dz * progress);
 
-            for (Player player : audience) {
-                if (player.getWorld().equals(loc.getWorld()) &&
-                    player.getLocation().distanceSquared(loc) <= config.viewDistance() * config.viewDistance()) {
-                    player.spawnParticle(particle, loc, 3, 0, 0, 0, speed);
-                }
-            }
+            emit(loc, particle, Math.max(1, 3), speed, audience);
         }
     }
 

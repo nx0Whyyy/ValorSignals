@@ -15,8 +15,14 @@ public final class RabbitManager {
     private final JavaPlugin plugin;
     private final Config config;
     private final Logger logger;
-    private Connection connection;
-    private Channel channel;
+    private volatile Connection connection;
+    private volatile Channel channel;
+    private volatile Runnable connectionListener = () -> {};
+
+    public void onConnected(Runnable listener) {
+        connectionListener = listener;
+        if (isConnected()) listener.run();
+    }
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private volatile boolean reconnecting = false;
     private volatile boolean shutdown = false;
@@ -49,7 +55,9 @@ public final class RabbitManager {
                 channel.queueDeclare(queue, true, false, false, null);
                 channel.queueBind(queue, config.rabbitExchange(), "event.*");
 
+                if (shutdown) { channel.close(); connection.close(); return; }
                 connected.set(true);
+                connectionListener.run();
                 logger.info("Connected to RabbitMQ.");
             } catch (Exception e) {
                 logger.warning("Failed to connect to RabbitMQ: " + e.getMessage() + ". Will retry in background.");
@@ -71,6 +79,7 @@ public final class RabbitManager {
             return;
         }
         FoliaScheduler.runAsyncDelayed(plugin, () -> {
+            if (shutdown) return;
             try {
                 ConnectionFactory factory = new ConnectionFactory();
                 factory.setHost(config.rabbitHost());
@@ -84,7 +93,9 @@ public final class RabbitManager {
                 String queue = config.rabbitExchange() + ".events." + config.serverId();
                 channel.queueDeclare(queue, true, false, false, null);
                 channel.queueBind(queue, config.rabbitExchange(), "event.*");
+                if (shutdown) { channel.close(); connection.close(); return; }
                 connected.set(true);
+                connectionListener.run();
                 logger.info("Reconnected to RabbitMQ.");
             } catch (Exception e) {
                 if (!shutdown) {

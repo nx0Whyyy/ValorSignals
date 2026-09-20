@@ -14,6 +14,6 @@ public record EntityMoveStep(
     public void execute(AnimationContext context) {
         if (entity == null || !entity.isValid()) return;
         Location target = context.getOrigin().clone().add(targetOffset);
-        entity.teleport(target);
+        com.valorsky.skysignals.util.FoliaScheduler.runEntity(context.getSequence().getPlugin(), entity, () -> entity.teleportAsync(target));
     }
 }

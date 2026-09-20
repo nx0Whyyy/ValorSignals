@@ -18,9 +18,11 @@ public record EntitySpawnStep(
     @Override
     public void execute(AnimationContext context) {
         Location loc = context.getOrigin().clone().add(offset);
+        com.valorsky.skysignals.util.FoliaScheduler.runRegion(context.getSequence().getPlugin(), loc, () -> {
         Entity entity = loc.getWorld().spawnEntity(loc, entityType);
         if (configurator != null) {
             configurator.accept(entity);
         }
+        });
     }
 }

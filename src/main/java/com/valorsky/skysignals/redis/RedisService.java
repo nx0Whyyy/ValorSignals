@@ -37,7 +37,7 @@ public final class RedisService {
     private RedisPubSubAsyncCommands<String, String> pubSubAsync;
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private final String prefix = "skysignals:";
-    private final List<RedisEventListener> listeners = java.util.Collections.synchronizedList(new ArrayList<>());
+    private final List<RedisEventListener> listeners = new java.util.concurrent.CopyOnWriteArrayList<>();
     private volatile boolean reconnecting = false;
     private volatile boolean shutdown = false;
 
@@ -60,6 +60,7 @@ public final class RedisService {
         }
          try {
              RedisURI uri = RedisURI.create(config.redisUri());
+             uri.setTimeout(java.time.Duration.ofSeconds(3));
              if (!config.redisPassword().isEmpty()) {
                  uri.setPassword(config.redisPassword().toCharArray());
              }
@@ -72,6 +73,7 @@ public final class RedisService {
              startPubSub();
          } catch (Exception e) {
              logger.warning("Failed to connect to Redis: " + e.getMessage() + ". Will retry in background.");
+             closeConnections();
              client = null;
              connection = null;
              sync = null;
@@ -193,7 +195,7 @@ public final class RedisService {
                 String json = sync.hget(key, "json");
                 if (json != null) {
                     EventState state = gson.fromJson(json, EventState.class);
-                    if (state.status() == SkyEventStatus.ACTIVE) {
+                    if (state.status() != SkyEventStatus.FINISHED && state.status() != SkyEventStatus.CANCELLED && state.status() != SkyEventStatus.SCHEDULED) {
                         result.add(state);
                     }
                 }
@@ -225,8 +227,11 @@ public final class RedisService {
             return;
         }
         FoliaScheduler.runAsyncDelayed(plugin, () -> {
+            if (shutdown) return;
+            closeConnections();
             try {
                 RedisURI uri = RedisURI.create(config.redisUri());
+             uri.setTimeout(java.time.Duration.ofSeconds(3));
                 if (!config.redisPassword().isEmpty()) {
                     uri.setPassword(config.redisPassword().toCharArray());
                 }
@@ -234,6 +239,7 @@ public final class RedisService {
                 connection = client.connect();
                 sync = connection.sync();
                 async = connection.async();
+                if (shutdown) { closeConnections(); return; }
                 connected.set(true);
                 logger.info("Reconnected to Redis.");
                 startPubSub();
@@ -254,14 +260,15 @@ public final class RedisService {
         shutdown = true;
         connected.set(false);
         reconnecting = false;
-        try {
-            if (pubSubConnection != null) pubSubConnection.close();
-            if (async != null) async.getStatefulConnection().close();
-        } catch (Exception ignored) {
-        }
-        if (client != null) client.shutdown();
+        closeConnections();
         listeners.clear();
         logger.info("Redis disconnected.");
+    }
+
+    private void closeConnections() {
+        try { if (pubSubConnection != null) pubSubConnection.close(); } catch (Exception ignored) {}
+        try { if (connection != null) connection.close(); } catch (Exception ignored) {}
+        try { if (client != null) client.shutdown(); } catch (Exception ignored) {}
     }
 
     public RedisClient getClient() {

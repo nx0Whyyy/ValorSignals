@@ -38,13 +38,16 @@ public final class EventConsumer {
                 .create();
     }
 
-    public void startConsuming() {
+    private Channel consumingChannel;
+
+    public synchronized void startConsuming() {
         if (!rabbitManager.isConnected()) {
             logger.warning("RabbitMQ not connected, cannot start consumer.");
             return;
         }
         try {
             Channel channel = rabbitManager.getChannel();
+            if (channel == consumingChannel) return;
             String queue = config.rabbitExchange() + ".events." + config.serverId();
 
             com.rabbitmq.client.Consumer consumer = new DefaultConsumer(channel) {
@@ -67,6 +70,7 @@ public final class EventConsumer {
             };
 
             channel.basicConsume(queue, false, consumer);
+            consumingChannel = channel;
             logger.info("RabbitMQ consumer started on queue: " + queue);
         } catch (Exception e) {
             logger.warning("Failed to start RabbitMQ consumer: " + e.getMessage());
@@ -82,6 +86,7 @@ public final class EventConsumer {
             case "event.created":
                 eventManager.handleEventCreated(state);
                 break;
+            case "event.updated":
             case "event.started":
                 eventManager.handleEventStarted(state);
                 break;
