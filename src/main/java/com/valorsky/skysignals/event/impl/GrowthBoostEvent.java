@@ -54,9 +54,15 @@ public final class GrowthBoostEvent extends AbstractSkyEvent implements Listener
     }
 
     @Override
+    public List<EventLocation> getEventLocations() {
+        return plugin.getServer().getWorlds().stream()
+                .map(world -> EventLocation.world(world.getName(), "Cultures dans tout le monde"))
+                .toList();
+    }
+
+    @Override
     protected void onAnnouncing() {
         this.status = SkyEventStatus.ANNOUNCING;
-        notificationService.notifyEventPhase(this, "start");
         soundService.playGlobal("growth_boost_start");
     }
 

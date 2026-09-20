@@ -37,7 +37,7 @@ public final class SkyChestEvent extends AbstractSkyEvent {
     private final Config config;
     private final Logger logger;
 
-    private Location chestLocation;
+    private volatile Location chestLocation;
     private Location beamStart;
     private Chest chestBlock;
     private TaskHandle beamTask;
@@ -119,6 +119,13 @@ public final class SkyChestEvent extends AbstractSkyEvent {
                 soundService.playGlobal("sky_chest_descend");
             });
         });
+    }
+
+    @Override
+    public List<EventLocation> getEventLocations() {
+        Location location = chestLocation;
+        return location == null || location.getWorld() == null ? List.of()
+                : List.of(EventLocation.at(location, "Atterrissage de la caisse", 0));
     }
 
     @Override

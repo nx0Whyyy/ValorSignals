@@ -36,7 +36,7 @@ public final class MineralRainEvent extends AbstractSkyEvent {
     private final Config config;
     private final Logger logger;
 
-    private Location rainCenter;
+    private volatile Location rainCenter;
     private TaskHandle spawnTask;
     private TaskHandle cleanupTask;
     private final Map<UUID, Item> items = new ConcurrentHashMap<>();
@@ -115,6 +115,13 @@ public final class MineralRainEvent extends AbstractSkyEvent {
                 soundService.playGlobal("mineral_rain_start");
             });
         });
+    }
+
+    @Override
+    public List<EventLocation> getEventLocations() {
+        Location location = rainCenter;
+        return location == null || location.getWorld() == null ? List.of()
+                : List.of(EventLocation.at(location, "Zone de retombée", 20));
     }
 
     @Override

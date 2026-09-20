@@ -1,5 +1,6 @@
 package com.valorsky.skysignals.event;
 
+import com.valorsky.skysignals.util.FoliaScheduler;
 import net.kyori.adventure.bossbar.BossBar;
 import org.bukkit.Location;
 import org.bukkit.block.Block;
@@ -7,7 +8,6 @@ import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -39,7 +39,7 @@ public final class EventResourceRegistry {
         register(eventId, new BossBarResource(bossBar, plugin));
     }
 
-    public void registerTask(UUID eventId, BukkitTask task) {
+    public void registerTask(UUID eventId, FoliaScheduler.TaskHandle task) {
         register(eventId, new TaskResource(task));
     }
 
@@ -103,10 +103,10 @@ public final class EventResourceRegistry {
         }
     }
 
-    private record TaskResource(BukkitTask task) implements Resource {
+    private record TaskResource(FoliaScheduler.TaskHandle task) implements Resource {
         @Override
         public void cleanup() {
-            if (task != null && !task.isCancelled()) {
+            if (task != null) {
                 task.cancel();
             }
         }

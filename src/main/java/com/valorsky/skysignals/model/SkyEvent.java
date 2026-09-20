@@ -35,6 +35,8 @@ public interface SkyEvent {
 
     default boolean isReady() { return true; }
 
+    default java.util.List<EventLocation> getEventLocations() { return java.util.List.of(); }
+
     void start();
 
     void onPhaseChange(SkyEventPhase phase);

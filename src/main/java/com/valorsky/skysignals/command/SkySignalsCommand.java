@@ -125,6 +125,7 @@ public final class SkySignalsCommand implements TabExecutor {
                     "  <yellow>" + event.getType().symbol() + " " + event.getType().displayName() + "</yellow> " +
                     "<gray>Phase: " + event.getPhase() + " | Temps restant: " + formatTime(event.getSecondsRemaining()) + "</gray>"
             ));
+            sender.sendMessage(notificationService.describeLocation(event));
         }
     }
 

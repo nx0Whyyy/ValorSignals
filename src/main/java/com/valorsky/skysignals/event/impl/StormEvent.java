@@ -28,7 +28,7 @@ public final class StormEvent extends AbstractSkyEvent {
     private final SoundService soundService;
     private final Logger logger;
 
-    private World world;
+    private volatile World world;
     private boolean weatherCaptured;
     private boolean wasStorming = false;
     private boolean wasThundering = false;
@@ -45,6 +45,12 @@ public final class StormEvent extends AbstractSkyEvent {
         this.particleService = particleService;
         this.soundService = soundService;
         this.logger = plugin.getLogger();
+    }
+
+    @Override
+    public List<EventLocation> getEventLocations() {
+        World affected = world;
+        return affected == null ? List.of() : List.of(EventLocation.world(affected.getName(), "Orage dans tout le monde"));
     }
 
     @Override
@@ -101,7 +107,6 @@ public final class StormEvent extends AbstractSkyEvent {
             return;
         }
 
-        notificationService.notifyEventPhase(this, "start");
         soundService.playGlobal("storm_start");
     }
 

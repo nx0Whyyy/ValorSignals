@@ -1,12 +1,16 @@
 # ValorSky SkySignals
 
-**Version 2.0.2** — Dynamic celestial events for the ValorSky Minecraft network, targeting **Folia 1.21.11**.
+**Version 2.0.5** — Dynamic celestial events for the ValorSky Minecraft network, targeting **Folia 1.21.11**.
 
-## Version 2.0.2
+## Version 2.0.5
 
-Fixes Folia scheduling, event phase progression, standalone scheduling without Redis, reward claims, configuration loading, and distribution packaging. Build and distribution checks pass with 44 unit tests.
+All six event types expose their actual destination or affected worlds in chat and `/skysignals active`. Meteor and sky chest messages show block coordinates and world; invasion and mineral rain messages include the zone radius. Storm and growth boost list affected worlds without inventing a landing point. Locations appear once when ready and again on impact/landing. Existing `messages.yml` files use built-in defaults for the new `location.*` keys.
 
-Install the complete `ValorSky-SkySignals-2.0.2.jar`; the `-plain.jar` does not include runtime dependencies. Stop the server before replacing older versions.
+Chat durations now render as `2 min 49 s`; duplicate meteor warnings are removed. The boss bar keeps its `MM:SS` display.
+
+Fixes Folia scheduling, event phase progression, standalone scheduling without Redis, reward claims, configuration loading, and distribution packaging. Build and distribution checks pass with 52 unit tests.
+
+Install the complete `ValorSky-SkySignals-2.0.5.jar`; the `-plain.jar` does not include runtime dependencies. Stop the server before replacing older versions.
 
 Live Folia validation is still required. Island/protection adapters and PlaceholderAPI integration remain incomplete. See [the audit and validation notes](AUDIT.md) for known limitations and deployment checks.
 
@@ -42,7 +46,7 @@ Live Folia validation is still required. Island/protection adapters and Placehol
 
 ## Installation
 
-1. Download `ValorSky-SkySignals-2.0.2.jar` from `build/libs/`
+1. Download `ValorSky-SkySignals-2.0.5.jar` from `build/libs/`
 2. Place it in your Folia server's `plugins/` directory
 3. Start the server once to generate default configuration files
 4. Edit `plugins/ValorSky-SkySignals/config.yml` with your service credentials
@@ -141,8 +145,8 @@ The plugin will retry connections in the background using Folia's `AsyncSchedule
 ```
 
 **Output:**
-- `build/libs/ValorSky-SkySignals-2.0.2.jar` — Shaded plugin JAR (ready for deployment)
-- `build/distributions/ValorSky-SkySignals-2.0.2.zip` — Distribution package
+- `build/libs/ValorSky-SkySignals-2.0.5.jar` — Shaded plugin JAR (ready for deployment)
+- `build/distributions/ValorSky-SkySignals-2.0.5.zip` — Distribution package
 
 ### Building on Windows
 
@@ -245,7 +249,7 @@ Tests cover:
 
 ### Version
 
-Current version: **2.0.2** (Folia 1.21.11 compatible)
+Current version: **2.0.5** (Folia 1.21.11 compatible)
 
 ### Code Style
 

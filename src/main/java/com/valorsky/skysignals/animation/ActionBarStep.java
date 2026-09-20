@@ -1,7 +1,8 @@
 package com.valorsky.skysignals.animation;
 
-import net.kyori.adventure.text.Component;
 import org.bukkit.entity.Player;
+
+import net.kyori.adventure.text.Component;
 
 public record ActionBarStep(
     Component message

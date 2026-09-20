@@ -38,7 +38,7 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
     private final Config config;
     private final Logger logger;
 
-    private Location spawnCenter;
+    private volatile Location spawnCenter;
     private final List<LivingEntity> spawnedMobs = new java.util.concurrent.CopyOnWriteArrayList<>();
     private TaskHandle waveTask;
     private TaskHandle checkTask;
@@ -119,6 +119,13 @@ public final class MobInvasionEvent extends AbstractSkyEvent {
                 soundService.playGlobal("mob_invasion_start");
             });
         });
+    }
+
+    @Override
+    public List<EventLocation> getEventLocations() {
+        Location location = spawnCenter;
+        return location == null || location.getWorld() == null ? List.of()
+                : List.of(EventLocation.at(location, "Zone d’invasion", 15));
     }
 
     @Override

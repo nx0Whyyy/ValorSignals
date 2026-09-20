@@ -3,7 +3,8 @@ prefix: "<gradient:#9333ea:#3b82f6>SkySignals</gradient>"
 meteor:
   announcement: "<gradient:#9333ea:#3b82f6>☄ SIGNAL CÉLESTE</gradient>"
   start: "<yellow>Une anomalie vient d'être détectée dans l'atmosphère."
-  warning: "<red>☄ IMPACT IMMINENT\n<white>Impact dans <yellow>%time%</white> secondes"
+  warning: "<red>☄ Impact imminent !</red>\n<gray>Temps restant de l’événement : <yellow>%time%</yellow></gray>"
+  coordinates: "<gray>📍 Impact : <yellow>X %x% <gray>•</gray> Y %y% <gray>•</gray> Z %z%</yellow> <dark_gray>(%world%)</dark_gray></gray>"
   impact: "<gold>💥 La météorite vient de frapper !"
   direction: "<gray>📍 Direction : <white>%direction%</white></gray>"
   crater: "<gold>☄ CRATÈRE MÉTÉORITIQUE\n<gray>Récompenses disponibles"
@@ -22,12 +23,13 @@ sky_chest:
   descending: "<yellow>Une caisse mystérieuse descend du ciel..."
   beam: "<aqua>✨ Un faisceau lumineux marque l'emplacement"
   landing: "<gold>🎁 La caisse a atterri !"
-  unlocking: "<yellow>🔒 CAISSE CÉLESTE\n<white>Déverrouillage dans <yellow>%time%</white>s"
+  unlocking: "<yellow>🔒 Caisse céleste</yellow>\n<gray>Déverrouillage dans <yellow>%time%</yellow></gray>"
   unlocked: "<green>La caisse est maintenant déverrouillée !"
   claimed: "<gray>Cette caisse a déjà été récupérée."
   finish: "<green>La caisse céleste s'est évaporée."
 
 mob_invasion:
+  start: "<red>Une invasion se prépare ! Rejoignez la zone indiquée."
   announcement: "<red>👾 INVASION CÉLESTE</red>"
   wave: "<yellow>Vague <white>%wave%</white>/<white>%max%</white>"
   remaining: "<gray>Mobs restants : <white>%count%</white>"
@@ -73,3 +75,9 @@ placeholders:
   active: "<green>Oui</green>"
   inactive: "<red>Non</red>"
   none: "<gray>Aucun</gray>"
+# Localisation commune à tous les événements. Les événements mondiaux n'ont pas de point d'arrivée.
+location:
+  pending: "<gray>📍 Localisation en cours de recherche…</gray>"
+  point: "<gray>📍 %label% <dark_gray>•</dark_gray> Monde : <aqua>%world%</aqua>\nX : <yellow>%x%</yellow> <dark_gray>•</dark_gray> Y : <yellow>%y%</yellow> <dark_gray>•</dark_gray> Z : <yellow>%z%</yellow></gray>"
+  area: "<gray>📍 %label% <dark_gray>•</dark_gray> Monde : <aqua>%world%</aqua>\nX : <yellow>%x%</yellow> <dark_gray>•</dark_gray> Y : <yellow>%y%</yellow> <dark_gray>•</dark_gray> Z : <yellow>%z%</yellow> <dark_gray>•</dark_gray> Rayon : <yellow>%radius% blocs</yellow></gray>"
+  world: "<gray>📍 %label% <dark_gray>•</dark_gray> Monde : <aqua>%world%</aqua></gray>"

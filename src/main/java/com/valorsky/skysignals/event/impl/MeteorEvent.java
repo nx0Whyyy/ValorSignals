@@ -35,7 +35,7 @@ public final class MeteorEvent extends AbstractSkyEvent {
     private final Logger logger;
 
     private Location meteorStart;
-    private Location meteorTarget;
+    private volatile Location meteorTarget;
     private FallingBlock meteorBlock;
     private TaskHandle meteorTask;
     private TaskHandle trailTask;
@@ -112,14 +112,25 @@ public final class MeteorEvent extends AbstractSkyEvent {
                 Location loc = location.get();
                 meteorTarget = loc;
 
-                notificationService.notifyEventPhase(this, "warning");
                 soundService.playGlobal("meteor_start");
             });
         });
     }
 
     @Override
+    public List<EventLocation> getEventLocations() {
+        Location location = meteorTarget;
+        return location == null || location.getWorld() == null ? List.of()
+                : List.of(EventLocation.at(location, "Point d’impact", 0));
+    }
+
+    @Override
     public boolean isReady() { return meteorTarget != null; }
+
+    public Optional<Location> getImpactLocation() {
+        Location target = meteorTarget;
+        return target == null ? Optional.empty() : Optional.of(target.clone());
+    }
 
     private void startMeteorDescent() {
         if (meteorTarget == null) return;
@@ -208,6 +219,7 @@ public final class MeteorEvent extends AbstractSkyEvent {
             // Terrain edits are intentionally excluded from the visual impact.
         }
 
+        notificationService.notifyEventPhase(this, "impact");
         cleanupMeteor();
     }
 
