@@ -15,8 +15,8 @@ import com.valorsky.skysignals.rabbitmq.RabbitManager;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
-import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
+import org.bukkit.command.TabExecutor;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.time.Instant;
@@ -261,14 +261,20 @@ public final class SkySignalsCommand implements TabExecutor {
         if (!config.testingVisuals()) {
             sender.sendMessage(miniMessage.deserialize("<yellow>Les tests visuels sont désactivés.</yellow>"));
         }
+        org.bukkit.Location testLocation = sender instanceof Player player ? player.getLocation().clone() : null;
         api.getEventManager().createEvent(type, eventContext).thenCompose(event ->
             com.valorsky.skysignals.util.FoliaScheduler.supplyGlobal(plugin, () -> {
+                if (event instanceof MeteorEvent meteor && testLocation != null) {
+                    meteor.setForcedTarget(testLocation);
+                }
                 ((com.valorsky.skysignals.SkySignalsPlugin) plugin).getRewardService().markTestEvent(event.getId());
                 api.getEventManager().startEvent(event);
                 return event;
             })).whenComplete((event, error) -> {
                 if (error != null) sender.sendMessage(net.kyori.adventure.text.Component.text("Test impossible : " + error.getMessage()));
-                else sender.sendMessage(net.kyori.adventure.text.Component.text("Test lancé : " + type.displayName() + (config.testingRewards() ? " (récompenses activées)" : " (sans récompenses)")));
+                else sender.sendMessage(net.kyori.adventure.text.Component.text("Test lancé : " + type.displayName()
+                        + (testLocation == null ? "" : " à vos coordonnées")
+                        + (config.testingRewards() ? " (récompenses activées)" : " (sans récompenses)")));
             });
     }
 

@@ -25,6 +25,32 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class EventLocationTest {
+    @Test
+    void meteorTestUsesTheCommandPlayersExactLocation() {
+        var plugin = mock(JavaPlugin.class);
+        when(plugin.getLogger()).thenReturn(Logger.getAnonymousLogger());
+        var world = mock(World.class);
+        when(world.getName()).thenReturn("test_world");
+        var locations = mock(SafeLocationService.class);
+        var sound = mock(SoundService.class);
+        var now = Instant.now();
+        var state = new EventState(UUID.randomUUID(), SkyEventType.METEOR, "test", EventScope.SERVER,
+                now, now, now.plusSeconds(180), SkyEventStatus.SCHEDULED,
+                SkyEventPhase.SCHEDULED, 0, Map.of());
+        var meteor = new MeteorEvent(state, plugin, mock(NotificationService.class),
+                mock(RewardService.class), mock(ParticleService.class), sound, locations, mock(Config.class));
+
+        meteor.setForcedTarget(new Location(world, 42.8, 75, -18.2));
+        meteor.onPhaseChange(SkyEventPhase.ANNOUNCING);
+
+        var target = meteor.getImpactLocation().orElseThrow();
+        assertEquals(42.8, target.getX());
+        assertEquals(75, target.getY());
+        assertEquals(-18.2, target.getZ());
+        verifyNoInteractions(locations);
+        verify(sound).playGlobal("meteor_start");
+    }
+
     @ParameterizedTest
     @EnumSource(value = SkyEventType.class, names = {"METEOR", "SKY_CHEST", "MOB_INVASION", "MINERAL_RAIN"})
     void exposesTheActualPreparedDestination(SkyEventType type) {

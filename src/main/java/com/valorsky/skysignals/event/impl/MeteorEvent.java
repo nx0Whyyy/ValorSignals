@@ -18,6 +18,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.util.Transformation;
+import org.bukkit.util.Vector;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
@@ -38,6 +39,7 @@ public final class MeteorEvent extends AbstractSkyEvent {
 
     private Location meteorStart;
     private volatile Location meteorTarget;
+    private volatile Location forcedTarget;
     private ItemDisplay meteorDisplay;
     private TaskHandle meteorTask;
     private TaskHandle trailTask;
@@ -104,6 +106,12 @@ public final class MeteorEvent extends AbstractSkyEvent {
     }
 
     private void findTargetAndPrepare() {
+        Location testTarget = forcedTarget;
+        if (testTarget != null && testTarget.getWorld() != null) {
+            meteorTarget = testTarget.clone();
+            soundService.playGlobal("meteor_start");
+            return;
+        }
         locationService.findNearPlayersAsync(10, 30).whenComplete((location, error) -> {
             if (!plugin.isEnabled()) return;
             FoliaScheduler.runGlobal(plugin, () -> {
@@ -136,17 +144,31 @@ public final class MeteorEvent extends AbstractSkyEvent {
         return target == null ? Optional.empty() : Optional.of(target.clone());
     }
 
+    public void setForcedTarget(Location location) {
+        if (location == null || location.getWorld() == null) {
+            throw new IllegalArgumentException("Meteor test target must belong to a world");
+        }
+        this.forcedTarget = location.clone();
+    }
+
     private void startMeteorDescent() {
         if (meteorTarget == null) return;
 
-        FoliaScheduler.runRegion(plugin, meteorTarget, () -> {
+        boolean testAtPlayer = forcedTarget != null;
+        double angle = random.nextDouble() * Math.PI * 2.0;
+        double horizontalDistance = testAtPlayer ? 0.0 : config.getMeteorHorizontalDistance();
+        double startHeight = testAtPlayer
+                ? Math.min(config.getMeteorStartHeight(), Math.max(24.0, config.viewDistance() * 0.75))
+                : config.getMeteorStartHeight();
+        Location start = meteorTarget.clone().add(
+                Math.cos(angle) * horizontalDistance,
+                startHeight,
+                Math.sin(angle) * horizontalDistance);
+
+        // Folia requires entity creation to run on the region that owns the spawn location.
+        FoliaScheduler.runRegion(plugin, start, () -> {
             if (cancelled || getStatus() == SkyEventStatus.FINISHED) return;
-            double angle = random.nextDouble() * Math.PI * 2.0;
-            double horizontalDistance = config.getMeteorHorizontalDistance();
-            meteorStart = meteorTarget.clone().add(
-                    Math.cos(angle) * horizontalDistance,
-                    config.getMeteorStartHeight(),
-                    Math.sin(angle) * horizontalDistance);
+            meteorStart = start;
             descentTick = 0;
             meteorDisplay = spawnMeteorDisplay(meteorStart);
 
@@ -160,7 +182,11 @@ public final class MeteorEvent extends AbstractSkyEvent {
                 Location loc = meteorDisplay.getLocation();
                 List<Player> audience = getNearbyPlayers(loc, 160);
                 if (!audience.isEmpty()) {
-                    particleService.spawnMeteorTrail(meteorStart, loc, Particle.FLAME, 10, 0.01, audience);
+                    Vector towardStart = meteorStart.toVector().subtract(loc.toVector());
+                    if (towardStart.lengthSquared() > 0.001) {
+                        Location tail = loc.clone().add(towardStart.normalize().multiply(8.0));
+                        particleService.spawnMeteorTrail(tail, loc, Particle.FLAME, 18, 0.01, audience);
+                    }
                 }
             }, 1L, 2L);
 
