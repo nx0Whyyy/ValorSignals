@@ -182,12 +182,20 @@ public final class MeteorEvent extends AbstractSkyEvent {
                 }
                 Location loc = meteorDisplay.getLocation();
                 List<Player> audience = getNearbyPlayers(loc, 160);
-                if (!audience.isEmpty()) {
+                if (!audience.isEmpty() && config.meteorEffectsEnabled()) {
                     Vector towardStart = meteorStart.toVector().subtract(loc.toVector());
                     if (towardStart.lengthSquared() > 0.001) {
-                        Location tail = loc.clone().add(towardStart.normalize().multiply(8.0));
-                        particleService.spawnMeteorTrail(tail, loc, Particle.FLAME, 18, 0.01, audience);
+                        Location tail = loc.clone().add(towardStart.normalize().multiply(config.getMeteorTrailLength()));
+                        particleService.spawnMeteorTrail(tail, loc, Particle.FLAME,
+                                config.getMeteorFlameCount(), 0.02, audience);
                     }
+                    double radius = config.getMeteorEffectRadius();
+                    particleService.spawnCircle(loc, Particle.FLAME, radius,
+                            config.getMeteorFlameCount(), 0.02, audience);
+                    particleService.spawnSphere(loc, Particle.SMOKE, radius * 0.75,
+                            config.getMeteorSmokeCount(), 0.015, audience);
+                    particleService.spawnSphere(loc, Particle.LAVA, radius * 0.55,
+                            config.getMeteorLavaCount(), 0.01, audience);
                 }
             }, 1L, 2L);
 
@@ -197,10 +205,6 @@ public final class MeteorEvent extends AbstractSkyEvent {
                     return;
                 }
                 Location loc = meteorDisplay.getLocation();
-                List<Player> audience = getNearbyPlayers(loc, 160);
-                if (!audience.isEmpty()) {
-                    particleService.spawnCircle(loc, Particle.FLAME, 2, 5, 0.01, audience);
-                }
 
                 int totalTicks = config.getMeteorDescentDuration() * 20;
                 descentTick++;

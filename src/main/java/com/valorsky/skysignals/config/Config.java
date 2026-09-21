@@ -139,7 +139,8 @@ public class Config {
     }
 
     public int maxParticlesPerSecond() {
-        return config.getInt("visuals.particles.max-per-second", 250);
+        int maximum = config.getInt("visuals.particles.max-per-second", 1000);
+        return maximum == 250 ? 1000 : maximum;
     }
 
     public boolean soundsEnabled() {
@@ -238,8 +239,9 @@ public class Config {
     }
 
     public int getMeteorDescentDuration() {
-        return Math.max(5, Math.min(60,
-                config.getInt("events-config.meteor.model.descent-duration", 20)));
+        int duration = config.getInt("events-config.meteor.model.descent-duration", 8);
+        if (duration == 20) duration = 8;
+        return Math.max(3, Math.min(60, duration));
     }
 
     public double getMeteorStartHeight() {
@@ -250,6 +252,35 @@ public class Config {
     public double getMeteorHorizontalDistance() {
         return Math.max(0.0, Math.min(200.0,
                 config.getDouble("events-config.meteor.model.horizontal-distance", 80.0)));
+    }
+
+    public boolean meteorEffectsEnabled() {
+        return config.getBoolean("events-config.meteor.model.effects.enabled", true);
+    }
+
+    public double getMeteorEffectRadius() {
+        return Math.max(0.5, Math.min(6.0,
+                config.getDouble("events-config.meteor.model.effects.radius", 1.8)));
+    }
+
+    public int getMeteorFlameCount() {
+        return Math.max(1, Math.min(80,
+                config.getInt("events-config.meteor.model.effects.flame-count", 12)));
+    }
+
+    public int getMeteorSmokeCount() {
+        return Math.max(0, Math.min(60,
+                config.getInt("events-config.meteor.model.effects.smoke-count", 6)));
+    }
+
+    public int getMeteorLavaCount() {
+        return Math.max(0, Math.min(40,
+                config.getInt("events-config.meteor.model.effects.lava-count", 3)));
+    }
+
+    public double getMeteorTrailLength() {
+        return Math.max(2.0, Math.min(24.0,
+                config.getDouble("events-config.meteor.model.effects.trail-length", 10.0)));
     }
 
     public int getMobInvasionMaxMobs() {

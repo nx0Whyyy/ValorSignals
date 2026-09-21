@@ -45,7 +45,7 @@ visuals:
   view-distance: 48
   particles:
     enabled: true
-    max-per-second: 250
+    max-per-second: 1000
   sounds:
     enabled: true
   titles:
@@ -75,11 +75,18 @@ events-config:
       item-model: "skysignals:meteor"
       scale: 5.0
       rotation-speed: 4.0
-      descent-duration: 20
+      descent-duration: 8
       start-height: 100.0
       horizontal-distance: 80.0
       impact-item-model: "skysignals:meteor_impact"
       impact-scale: 1.5
+      effects:
+        enabled: true
+        radius: 1.8
+        flame-count: 12
+        smoke-count: 6
+        lava-count: 3
+        trail-length: 10.0
 
   storm:
     enabled: true
