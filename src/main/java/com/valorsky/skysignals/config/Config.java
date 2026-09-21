@@ -40,16 +40,21 @@ public class Config {
 
     public String resourcePackUrl() {
         String url = config.getString("resource-pack.url", "");
-        if (url.endsWith("ValorSky-SkySignals-ResourcePack-2.1.4.zip")) {
-            return url.replace("2.1.4.zip", "2.1.5.zip");
+        if (url.startsWith("https://raw.githubusercontent.com/nx0Whyyy/ValorSignals/")
+                && (url.endsWith("ValorSky-SkySignals-ResourcePack-2.1.4.zip")
+                || url.endsWith("ValorSky-SkySignals-ResourcePack-2.1.5.zip"))) {
+            return url.substring(0, url.lastIndexOf("2.1.")) + "2.1.6.zip";
         }
         return url;
     }
 
     public String resourcePackSha1() {
         String hash = config.getString("resource-pack.sha1", "");
-        return hash.equalsIgnoreCase("6ea662b80c77fd2c36156bb48d378ac27f813d7d")
-                ? "a11af4ca0e8d65349d1556dd2eab932a1deff40b" : hash;
+        if (hash.equalsIgnoreCase("6ea662b80c77fd2c36156bb48d378ac27f813d7d")
+                || hash.equalsIgnoreCase("a11af4ca0e8d65349d1556dd2eab932a1deff40b")) {
+            return "22a6056d8fec32fd0b40858e146c9bce0f37cf67";
+        }
+        return hash;
     }
 
     public boolean resourcePackRequired() {
@@ -210,6 +215,15 @@ public class Config {
 
     public String getMeteorItemModel() {
         return config.getString("events-config.meteor.model.item-model", "skysignals:meteor");
+    }
+
+    public String getMeteorImpactItemModel() {
+        return config.getString("events-config.meteor.model.impact-item-model", "skysignals:meteor_impact");
+    }
+
+    public float getMeteorImpactScale() {
+        return (float) Math.max(0.25, Math.min(4.0,
+                config.getDouble("events-config.meteor.model.impact-scale", 1.5)));
     }
 
     public float getMeteorModelScale() {

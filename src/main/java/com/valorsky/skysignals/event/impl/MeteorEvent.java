@@ -41,6 +41,7 @@ public final class MeteorEvent extends AbstractSkyEvent {
     private volatile Location meteorTarget;
     private volatile Location forcedTarget;
     private ItemDisplay meteorDisplay;
+    private ItemDisplay impactDisplay;
     private TaskHandle meteorTask;
     private TaskHandle trailTask;
     private float modelRotation;
@@ -254,6 +255,52 @@ public final class MeteorEvent extends AbstractSkyEvent {
         });
     }
 
+    private ItemDisplay spawnImpactDisplay(Location location) {
+        return location.getWorld().spawn(location, ItemDisplay.class, display -> {
+            display.setPersistent(false);
+            display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.FIXED);
+            display.setBillboard(Display.Billboard.FIXED);
+            display.setBrightness(new Display.Brightness(15, 15));
+            display.setViewRange(4.0f);
+            display.setDisplayWidth(24.0f);
+            display.setDisplayHeight(12.0f);
+
+            ItemStack item = new ItemStack(config.getMeteorModelItem());
+            ItemMeta meta = item.getItemMeta();
+            NamespacedKey model = NamespacedKey.fromString(config.getMeteorImpactItemModel());
+            if (model != null) meta.setItemModel(model);
+            else logger.warning("Invalid meteor impact model key: " + config.getMeteorImpactItemModel());
+            item.setItemMeta(meta);
+            display.setItemStack(item);
+
+            float scale = config.getMeteorImpactScale();
+            display.setTransformation(new Transformation(
+                    new Vector3f(), new Quaternionf(),
+                    new Vector3f(scale, scale, scale), new Quaternionf()));
+        });
+    }
+
+    private void playImpactModelAnimation() {
+        scheduleImpactStage("skysignals:meteor_impact_2", 10L);
+        scheduleImpactStage("skysignals:meteor_impact_3", 20L);
+        scheduleImpactStage("skysignals:meteor_impact_4", 30L);
+    }
+
+    private void scheduleImpactStage(String modelKey, long delayTicks) {
+        ItemDisplay display = impactDisplay;
+        if (display == null) return;
+        FoliaScheduler.runEntityDelayed(plugin, display, () -> {
+            if (!display.isValid() || display != impactDisplay) return;
+            ItemStack item = display.getItemStack();
+            ItemMeta meta = item.getItemMeta();
+            NamespacedKey model = NamespacedKey.fromString(modelKey);
+            if (model == null) return;
+            meta.setItemModel(model);
+            item.setItemMeta(meta);
+            display.setItemStack(item);
+        }, delayTicks);
+    }
+
     private void rotateMeteor() {
         modelRotation += config.getMeteorRotationSpeed();
         float radians = (float) Math.toRadians(modelRotation);
@@ -272,6 +319,9 @@ public final class MeteorEvent extends AbstractSkyEvent {
         if (cancelled) return;
         World world = meteorTarget.getWorld();
         if (world != null) {
+            cleanupFlight();
+            impactDisplay = spawnImpactDisplay(meteorTarget.clone().add(0.5, 0.4, 0.5));
+            playImpactModelAnimation();
             List<Player> audience = getNearbyPlayers(meteorTarget, 48);
             if (!audience.isEmpty()) {
                 particleService.spawnExplosion(meteorTarget, Particle.EXPLOSION, 5, 20, 0.1, audience);
@@ -299,7 +349,6 @@ public final class MeteorEvent extends AbstractSkyEvent {
         }
 
         notificationService.notifyEventPhase(this, "impact");
-        cleanupMeteor();
     }
 
     private List<Player> getNearbyPlayers(Location center, double radius) {
@@ -315,6 +364,15 @@ public final class MeteorEvent extends AbstractSkyEvent {
     }
 
     private void cleanupMeteor() {
+        cleanupFlight();
+        if (impactDisplay != null) {
+            ItemDisplay display = impactDisplay;
+            FoliaScheduler.runEntity(plugin, display, display::remove);
+            impactDisplay = null;
+        }
+    }
+
+    private void cleanupFlight() {
         if (meteorDisplay != null) {
             ItemDisplay display = meteorDisplay;
             FoliaScheduler.runEntity(plugin, display, display::remove);

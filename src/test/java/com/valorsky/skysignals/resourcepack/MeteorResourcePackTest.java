@@ -24,8 +24,35 @@ class MeteorResourcePackTest {
 
         var definition = JsonParser.parseString(Files.readString(
                 PACK.resolve("assets/skysignals/items/meteor.json"))).getAsJsonObject();
-        assertEquals("skysignals:item/meteor_flight",
+        assertEquals("skysignals:item/meteor_flight_source",
                 definition.getAsJsonObject("model").get("model").getAsString());
+
+        var impactDefinition = JsonParser.parseString(Files.readString(
+                PACK.resolve("assets/skysignals/items/meteor_impact.json"))).getAsJsonObject();
+        assertEquals("skysignals:item/meteor_impact_1",
+                impactDefinition.getAsJsonObject("model").get("model").getAsString());
+    }
+
+    @Test
+    void suppliedImpactSceneKeepsAllObjElements() throws Exception {
+        var model = JsonParser.parseString(Files.readString(
+                PACK.resolve("assets/skysignals/models/item/meteor.json"))).getAsJsonObject();
+        assertEquals(46, model.getAsJsonArray("elements").size());
+        assertTrue(model.getAsJsonArray("elements").asList().stream()
+                .allMatch(element -> element.getAsJsonObject().getAsJsonObject("faces").size() == 6));
+    }
+
+    @Test
+    void suppliedAnimationIsSplitIntoProgressiveImpactStages() throws Exception {
+        int[] expectedElements = {9, 21, 30, 46};
+        for (int stage = 1; stage <= 4; stage++) {
+            var model = JsonParser.parseString(Files.readString(PACK.resolve(
+                    "assets/skysignals/models/item/meteor_impact_" + stage + ".json"))).getAsJsonObject();
+            assertEquals(expectedElements[stage - 1], model.getAsJsonArray("elements").size());
+        }
+        var flight = JsonParser.parseString(Files.readString(PACK.resolve(
+                "assets/skysignals/models/item/meteor_flight_source.json"))).getAsJsonObject();
+        assertEquals(1, flight.getAsJsonArray("elements").size());
     }
 
     @Test

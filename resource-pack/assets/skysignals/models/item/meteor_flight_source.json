@@ -1,0 +1,93 @@
+{
+  "credit": "Flying element from supplied meteor animation",
+  "textures": {
+    "meteor": "skysignals:item/meteor",
+    "particle": "skysignals:item/meteor"
+  },
+  "elements": [
+    {
+      "from": [
+        1.0,
+        1.0,
+        1.0000000000000062
+      ],
+      "to": [
+        15.0,
+        15.0,
+        14.999999999999993
+      ],
+      "rotation": {
+        "origin": [
+          8,
+          8,
+          8
+        ],
+        "x": -18.75171151035052,
+        "y": -29.458433330053474,
+        "z": 36.265598638361226
+      },
+      "faces": {
+        "north": {
+          "uv": [
+            4.625,
+            3.374999761581421,
+            5.5,
+            4.25
+          ],
+          "texture": "#meteor",
+          "rotation": 90
+        },
+        "south": {
+          "uv": [
+            4.625,
+            3.374999761581421,
+            5.5,
+            4.25
+          ],
+          "texture": "#meteor",
+          "rotation": 270
+        },
+        "west": {
+          "uv": [
+            4.625,
+            3.374999761581421,
+            5.5,
+            4.25
+          ],
+          "texture": "#meteor",
+          "rotation": 270
+        },
+        "east": {
+          "uv": [
+            4.625,
+            4.25,
+            5.5,
+            3.374999761581421
+          ],
+          "texture": "#meteor",
+          "rotation": 90
+        },
+        "up": {
+          "uv": [
+            4.625,
+            3.374999761581421,
+            5.5,
+            4.25
+          ],
+          "texture": "#meteor",
+          "rotation": 0
+        },
+        "down": {
+          "uv": [
+            4.625,
+            3.374999761581421,
+            5.5,
+            4.25
+          ],
+          "texture": "#meteor",
+          "rotation": 0
+        }
+      }
+    }
+  ]
+}

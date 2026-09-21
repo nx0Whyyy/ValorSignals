@@ -1,6 +1,6 @@
 {
   "model": {
     "type": "minecraft:model",
-    "model": "skysignals:item/meteor_flight_source"
+    "model": "skysignals:item/meteor_impact_1"
   }
 }

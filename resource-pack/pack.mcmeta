@@ -2,6 +2,6 @@
   "pack": {
     "min_format": [75, 0],
     "max_format": [75, 0],
-    "description": "ValorSky SkySignals 2.1.5 - 3D flight meteor"
+    "description": "ValorSky SkySignals 2.1.6 - flight and impact models"
   }
 }
