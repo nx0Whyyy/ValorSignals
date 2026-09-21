@@ -16,6 +16,8 @@ import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
+import org.bukkit.block.Container;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -46,11 +48,13 @@ public final class MeteorEvent extends AbstractSkyEvent {
     private ItemDisplay impactDisplay;
     private TaskHandle meteorTask;
     private TaskHandle trailTask;
+    private TaskHandle restorationTask;
     private float modelRotation;
     private int descentTick;
     private final AtomicBoolean hasLanded = new AtomicBoolean(false);
     private final Set<UUID> notifiedPlayers = ConcurrentHashMap.newKeySet();
     private final Set<UUID> rewardedPlayers = ConcurrentHashMap.newKeySet();
+    private final Map<String, BlockSnapshot> craterSnapshot = new ConcurrentHashMap<>();
     private String direction = "unknown";
 
     public MeteorEvent(EventState state, JavaPlugin plugin, NotificationService notificationService,
@@ -419,14 +423,19 @@ public final class MeteorEvent extends AbstractSkyEvent {
                 Location column = new Location(world, x, floorY, z);
                 FoliaScheduler.runRegion(plugin, column, () -> {
                     for (int y = floorY + 1; y <= surfaceY + 1; y++) {
-                        world.getBlockAt(x, y, z).setType(Material.AIR, false);
+                        Block block = world.getBlockAt(x, y, z);
+                        captureOriginal(block);
+                        block.setType(Material.AIR, false);
                     }
-                    world.getBlockAt(x, floorY, z).setType(craterFloorMaterial(distance), false);
+                    Block floor = world.getBlockAt(x, floorY, z);
+                    captureOriginal(floor);
+                    floor.setType(craterFloorMaterial(distance), false);
                 });
             }
         }
         Location core = new Location(world, meteorTarget.getBlockX(), surfaceY - maxDepth, meteorTarget.getBlockZ());
         FoliaScheduler.runRegionDelayed(plugin, core, () -> buildCoreAndChest(core), 3L);
+        scheduleCraterRestoration();
     }
 
     private Material craterFloorMaterial(double distance) {
@@ -443,15 +452,21 @@ public final class MeteorEvent extends AbstractSkyEvent {
             for (int dz = -1; dz <= 1; dz++) {
                 if (dx == 0 && dz == 0) continue;
                 Location ringBlock = new Location(world, core.getBlockX() + dx, y, core.getBlockZ() + dz);
-                FoliaScheduler.runRegion(plugin, ringBlock,
-                        () -> ringBlock.getBlock().setType(Material.OBSIDIAN, false));
+                FoliaScheduler.runRegion(plugin, ringBlock, () -> {
+                    captureOriginal(ringBlock.getBlock());
+                    ringBlock.getBlock().setType(Material.OBSIDIAN, false);
+                });
             }
         }
-        world.getBlockAt(core.getBlockX(), y, core.getBlockZ()).setType(Material.CRYING_OBSIDIAN, false);
+        Block nucleus = world.getBlockAt(core.getBlockX(), y, core.getBlockZ());
+        captureOriginal(nucleus);
+        nucleus.setType(Material.CRYING_OBSIDIAN, false);
         if (!config.meteorChestEnabled()) return;
         Block chestBlock = world.getBlockAt(core.getBlockX(), y + 1, core.getBlockZ());
+        captureOriginal(chestBlock);
         chestBlock.setType(Material.CHEST, false);
         if (chestBlock.getState() instanceof Chest chest) {
+            chest.setCustomName("Noyau de météorite");
             List<Integer> slots = new ArrayList<>();
             for (int slot = 0; slot < chest.getInventory().getSize(); slot++) slots.add(slot);
             Collections.shuffle(slots, random);
@@ -463,6 +478,47 @@ public final class MeteorEvent extends AbstractSkyEvent {
             chest.update(true, false);
         }
     }
+
+    private void captureOriginal(Block block) {
+        String key = block.getWorld().getUID() + ":" + block.getX() + ":" + block.getY() + ":" + block.getZ();
+        craterSnapshot.computeIfAbsent(key, ignored -> {
+            ItemStack[] contents = block.getState() instanceof Container container
+                    ? Arrays.stream(container.getInventory().getContents())
+                    .map(item -> item == null ? null : item.clone()).toArray(ItemStack[]::new)
+                    : null;
+            return new BlockSnapshot(block.getWorld().getUID(), block.getX(), block.getY(), block.getZ(),
+                    block.getBlockData().clone(), contents);
+        });
+    }
+
+    private void scheduleCraterRestoration() {
+        if (!config.meteorRestorationEnabled() || restorationTask != null) return;
+        long delayTicks = config.getMeteorRestorationDelayMinutes() * 60L * 20L;
+        restorationTask = FoliaScheduler.runGlobalDelayed(plugin, this::restoreCrater, delayTicks);
+    }
+
+    private void restoreCrater() {
+        List<BlockSnapshot> snapshots = new ArrayList<>(craterSnapshot.values());
+        craterSnapshot.clear();
+        for (BlockSnapshot snapshot : snapshots) {
+            World world = Bukkit.getWorld(snapshot.worldId());
+            if (world == null) continue;
+            Location location = new Location(world, snapshot.x(), snapshot.y(), snapshot.z());
+            FoliaScheduler.runRegion(plugin, location, () -> {
+                Block block = location.getBlock();
+                block.setBlockData(snapshot.blockData(), false);
+                if (snapshot.contents() != null && block.getState() instanceof Container container) {
+                    container.getInventory().setContents(Arrays.stream(snapshot.contents())
+                            .map(item -> item == null ? null : item.clone()).toArray(ItemStack[]::new));
+                    container.update(true, false);
+                }
+            });
+        }
+        logger.info("Restored " + snapshots.size() + " blocks from meteor crater " + id);
+    }
+
+    private record BlockSnapshot(UUID worldId, int x, int y, int z,
+                                 BlockData blockData, ItemStack[] contents) { }
 
     private String formatLocation(Location location) {
         return location.getWorld().getName() + " " + location.getBlockX() + ","

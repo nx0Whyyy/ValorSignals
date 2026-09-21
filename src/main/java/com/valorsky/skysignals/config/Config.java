@@ -203,11 +203,20 @@ public class Config {
     }
 
     public int getMeteorCraterRadius() {
-        return Math.max(2, Math.min(12, config.getInt("events-config.meteor.crater.radius", 5)));
+        return Math.max(8, Math.min(16, config.getInt("events-config.meteor.crater.radius", 8)));
     }
 
     public int getMeteorCraterDepth() {
-        return Math.max(1, Math.min(8, config.getInt("events-config.meteor.crater.depth", 3)));
+        return Math.max(1, Math.min(8, config.getInt("events-config.meteor.crater.depth", 4)));
+    }
+
+    public boolean meteorRestorationEnabled() {
+        return config.getBoolean("events-config.meteor.crater.restoration.enabled", true);
+    }
+
+    public int getMeteorRestorationDelayMinutes() {
+        return Math.max(1, Math.min(1440,
+                config.getInt("events-config.meteor.crater.restoration.delay-minutes", 20)));
     }
 
     public boolean meteorChestEnabled() {
@@ -217,12 +226,21 @@ public class Config {
     public Map<Material, Integer> getMeteorChestLoot() {
         Map<Material, Integer> loot = new LinkedHashMap<>();
         var section = config.getConfigurationSection("events-config.meteor.crater.loot");
-        if (section == null) return loot;
-        for (String key : section.getKeys(false)) {
-            Material material = Material.matchMaterial(key);
-            if (material != null && material.isItem()) {
-                loot.put(material, Math.max(1, Math.min(material.getMaxStackSize(), section.getInt(key, 1))));
+        if (section != null) {
+            for (String key : section.getKeys(false)) {
+                Material material = Material.matchMaterial(key);
+                if (material != null && material.isItem()) {
+                    loot.put(material, Math.max(1, Math.min(material.getMaxStackSize(), section.getInt(key, 1))));
+                }
             }
+        }
+        if (loot.isEmpty()) {
+            loot.put(Material.DIAMOND, 3);
+            loot.put(Material.EMERALD, 6);
+            loot.put(Material.NETHERITE_SCRAP, 1);
+            loot.put(Material.GOLD_INGOT, 12);
+            loot.put(Material.IRON_INGOT, 24);
+            loot.put(Material.ENCHANTED_GOLDEN_APPLE, 1);
         }
         return loot;
     }
@@ -257,9 +275,10 @@ public class Config {
     }
 
     public float getMeteorModelScale() {
-        double scale = config.getDouble("events-config.meteor.model.scale", 5.0);
+        double scale = config.getDouble("events-config.meteor.model.scale", 3.0);
         // Upgrade both former defaults so existing installations get the visible size.
-        if (Math.abs(scale - 1.0) < 0.001 || Math.abs(scale - 2.25) < 0.001) scale = 5.0;
+        if (Math.abs(scale - 1.0) < 0.001 || Math.abs(scale - 2.25) < 0.001
+                || Math.abs(scale - 5.0) < 0.001) scale = 3.0;
         return (float) Math.max(0.1, Math.min(8.0, scale));
     }
 
@@ -268,8 +287,8 @@ public class Config {
     }
 
     public int getMeteorDescentDuration() {
-        int duration = config.getInt("events-config.meteor.model.descent-duration", 8);
-        if (duration == 20) duration = 8;
+        int duration = config.getInt("events-config.meteor.model.descent-duration", 5);
+        if (duration == 20 || duration == 8) duration = 5;
         return Math.max(3, Math.min(60, duration));
     }
 

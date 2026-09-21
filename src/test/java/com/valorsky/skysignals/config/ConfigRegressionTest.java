@@ -5,6 +5,21 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 class ConfigRegressionTest {
+    @Test void meteorDefaultsAndFormerValuesUpgradeToTheCompleteCrater() {
+        var yaml = new YamlConfiguration();
+        yaml.set("events-config.meteor.model.scale", 5.0);
+        yaml.set("events-config.meteor.model.descent-duration", 8);
+        yaml.set("events-config.meteor.crater.radius", 5);
+        var plugin = mock(JavaPlugin.class); when(plugin.getConfig()).thenReturn(yaml);
+        var config = new Config(plugin); config.load();
+        assertEquals(3.0f, config.getMeteorModelScale());
+        assertEquals(5, config.getMeteorDescentDuration());
+        assertEquals(8, config.getMeteorCraterRadius());
+        assertTrue(config.meteorRestorationEnabled());
+        assertEquals(20, config.getMeteorRestorationDelayMinutes());
+        assertFalse(config.getMeteorChestLoot().isEmpty());
+    }
+
     @Test void eventSettingsUseTheShippedUnderscoreKeys() {
         var yaml = new YamlConfiguration();
         yaml.set("events-config.mob_invasion.max-mobs", 7);
