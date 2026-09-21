@@ -18,7 +18,7 @@ plugins {
 }
 
 group = 'com.valorsky'
-version = '2.0.5'
+version = '2.1.0'
 description = 'Dynamic celestial events for ValorSky'
 
 java {
@@ -124,6 +124,16 @@ tasks.register('dist', Zip) {
     }
     dependsOn(shadowJar)
 }
+
+tasks.register('resourcePack', Zip) {
+    group = 'build'
+    description = 'Creates the client resource pack containing SkySignals models'
+    archiveFileName = "ValorSky-SkySignals-ResourcePack-${version}.zip"
+    destinationDirectory = file('build/distributions')
+    from('resource-pack')
+}
+
+dist.dependsOn(resourcePack)
 
 publishing {
     publications {

@@ -4,20 +4,22 @@ import com.valorsky.skysignals.event.AbstractSkyEvent;
 import com.valorsky.skysignals.model.*;
 import com.valorsky.skysignals.notification.NotificationService;
 import com.valorsky.skysignals.particle.ParticleService;
-import com.valorsky.skysignals.particle.MeteorTrailShape;
 import com.valorsky.skysignals.reward.RewardService;
 import com.valorsky.skysignals.sound.SoundService;
 import com.valorsky.skysignals.util.FoliaScheduler;
 import com.valorsky.skysignals.util.FoliaScheduler.TaskHandle;
-import com.valorsky.skysignals.util.PositionUtils;
 import com.valorsky.skysignals.config.Config;
 import com.valorsky.skysignals.location.SafeLocationService;
 import org.bukkit.*;
-import org.bukkit.block.Block;
-import org.bukkit.entity.FallingBlock;
+import org.bukkit.entity.Display;
+import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.util.Vector;
+import org.bukkit.util.Transformation;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,9 +38,10 @@ public final class MeteorEvent extends AbstractSkyEvent {
 
     private Location meteorStart;
     private volatile Location meteorTarget;
-    private FallingBlock meteorBlock;
+    private ItemDisplay meteorDisplay;
     private TaskHandle meteorTask;
     private TaskHandle trailTask;
+    private float modelRotation;
     private final AtomicBoolean hasLanded = new AtomicBoolean(false);
     private final Set<UUID> notifiedPlayers = ConcurrentHashMap.newKeySet();
     private final Set<UUID> rewardedPlayers = ConcurrentHashMap.newKeySet();
@@ -138,50 +141,80 @@ public final class MeteorEvent extends AbstractSkyEvent {
         FoliaScheduler.runRegion(plugin, meteorTarget, () -> {
             if (cancelled || getStatus() == SkyEventStatus.FINISHED) return;
             meteorStart = meteorTarget.clone().add(0, 80, 0);
-            meteorBlock = meteorStart.getWorld().spawnFallingBlock(
-                meteorStart,
-                Material.OBSIDIAN.createBlockData()
-            );
-            meteorBlock.setPersistent(false);
-            meteorBlock.setDropItem(false);
-            meteorBlock.setCancelDrop(true);
-
-            Vector velocity = meteorTarget.toVector().subtract(meteorStart.toVector()).normalize().multiply(1.5);
-            meteorBlock.setVelocity(velocity);
+            meteorDisplay = spawnMeteorDisplay(meteorStart);
 
             soundService.play("meteor_warning", meteorStart, getNearbyPlayers(meteorStart, 48));
 
-            trailTask = FoliaScheduler.runEntityRepeating(plugin, meteorBlock, () -> {
-                if (meteorBlock == null || !meteorBlock.isValid() || hasLanded.get()) {
+            trailTask = FoliaScheduler.runEntityRepeating(plugin, meteorDisplay, () -> {
+                if (meteorDisplay == null || !meteorDisplay.isValid() || hasLanded.get()) {
                     if (trailTask != null) trailTask.cancel();
                     return;
                 }
-                Location loc = meteorBlock.getLocation();
+                Location loc = meteorDisplay.getLocation();
                 List<Player> audience = getNearbyPlayers(loc, 48);
                 if (!audience.isEmpty()) {
-                    MeteorTrailShape trail = new MeteorTrailShape(meteorStart, loc, 10, 1.5);
                     particleService.spawnMeteorTrail(meteorStart, loc, Particle.FLAME, 10, 0.01, audience);
                 }
-            }, 5L, 2L);
+            }, 1L, 2L);
 
-            meteorTask = FoliaScheduler.runEntityRepeating(plugin, meteorBlock, () -> {
-                if (meteorBlock == null || !meteorBlock.isValid()) {
+            meteorTask = FoliaScheduler.runEntityRepeating(plugin, meteorDisplay, () -> {
+                if (meteorDisplay == null || !meteorDisplay.isValid()) {
                     handleImpact();
                     return;
                 }
-                Location loc = meteorBlock.getLocation();
+                Location loc = meteorDisplay.getLocation();
                 List<Player> audience = getNearbyPlayers(loc, 48);
                 if (!audience.isEmpty()) {
                     particleService.spawnCircle(loc, Particle.FLAME, 2, 5, 0.01, audience);
                 }
 
-                if (loc.distance(meteorTarget) < 2.0 || isOnGround(loc)) {
+                if (loc.getY() <= meteorTarget.getY() + 1.5) {
                     handleImpact();
+                    return;
                 }
-            }, 5L, 2L);
+                rotateMeteor();
+                meteorDisplay.teleportAsync(loc.clone().add(0, -config.getMeteorDescentSpeed(), 0));
+            }, 1L, 1L);
 
             logger.info("Meteor descent started at " + meteorStart.getWorld().getName());
         });
+    }
+
+    private ItemDisplay spawnMeteorDisplay(Location location) {
+        return location.getWorld().spawn(location, ItemDisplay.class, display -> {
+            display.setPersistent(false);
+            display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.FIXED);
+            display.setBillboard(Display.Billboard.FIXED);
+            display.setBrightness(new Display.Brightness(15, 15));
+            display.setTeleportDuration(1);
+            display.setInterpolationDuration(1);
+            display.setDisplayWidth(8.0f);
+            display.setDisplayHeight(8.0f);
+
+            ItemStack item = new ItemStack(config.getMeteorModelItem());
+            ItemMeta meta = item.getItemMeta();
+            if (config.isMeteorModelEnabled()) {
+                NamespacedKey model = NamespacedKey.fromString(config.getMeteorItemModel());
+                if (model != null) meta.setItemModel(model);
+                else logger.warning("Invalid meteor item model key: " + config.getMeteorItemModel());
+            }
+            item.setItemMeta(meta);
+            display.setItemStack(item);
+
+            float scale = config.getMeteorModelScale();
+            display.setTransformation(new Transformation(
+                    new Vector3f(), new Quaternionf(),
+                    new Vector3f(scale, scale, scale), new Quaternionf()));
+        });
+    }
+
+    private void rotateMeteor() {
+        modelRotation += config.getMeteorRotationSpeed();
+        float radians = (float) Math.toRadians(modelRotation);
+        float scale = config.getMeteorModelScale();
+        meteorDisplay.setTransformation(new Transformation(
+                new Vector3f(), new Quaternionf().rotateXYZ(radians * 0.35f, radians, radians * 0.15f),
+                new Vector3f(scale, scale, scale), new Quaternionf()));
     }
 
     private void handleImpact() {
@@ -235,17 +268,12 @@ public final class MeteorEvent extends AbstractSkyEvent {
         return result;
     }
 
-    private boolean isOnGround(Location location) {
-        return location.getBlock().getType() != Material.AIR
-            || location.clone().subtract(0, 0.1, 0).getBlock().getType() != Material.AIR;
-    }
-
     private void cleanupMeteor() {
-        if (meteorBlock != null) {
-            FallingBlock block = meteorBlock;
-            FoliaScheduler.runEntity(plugin, block, block::remove);
+        if (meteorDisplay != null) {
+            ItemDisplay display = meteorDisplay;
+            FoliaScheduler.runEntity(plugin, display, display::remove);
         }
-        meteorBlock = null;
+        meteorDisplay = null;
         if (meteorTask != null) meteorTask.cancel();
         if (trailTask != null) trailTask.cancel();
     }

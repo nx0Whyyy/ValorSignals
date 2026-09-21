@@ -1,14 +1,20 @@
 # ValorSky SkySignals
 
-**Version 2.0.5** — Dynamic celestial events for the ValorSky Minecraft network, targeting **Folia 1.21.11**.
+**Version 2.1.0** — Dynamic celestial events for the ValorSky Minecraft network, targeting **Folia 1.21.11**.
 
-## Version 2.0.5
+## Version 2.1.0
 
 All six event types expose their actual destination or affected worlds in chat and `/skysignals active`. Meteor and sky chest messages show block coordinates and world; invasion and mineral rain messages include the zone radius. Storm and growth boost list affected worlds without inventing a landing point. Locations appear once when ready and again on impact/landing. Existing `messages.yml` files use built-in defaults for the new `location.*` keys.
 
 Chat durations now render as `2 min 49 s`; duplicate meteor warnings are removed. The boss bar keeps its `MM:SS` display.
 
-Fixes Folia scheduling, event phase progression, standalone scheduling without Redis, reward claims, configuration loading, and distribution packaging. Build and distribution checks pass with 52 unit tests.
+## 3D meteor model
+
+Version 2.1.0 includes the supplied meteor model as a separate Minecraft 1.21.11 resource pack. Build everything with `./gradlew build dist`; the client pack is written to `build/distributions/ValorSky-SkySignals-ResourcePack-2.1.0.zip`.
+
+Host that ZIP and set its URL and SHA-1 in the server's `server.properties`. The plugin renders `skysignals:meteor` with an animated `ItemDisplay`. Its material, scale, rotation speed and descent speed are configurable under `events-config.meteor.model`. Players without the resource pack see the configured base item (`PAPER` by default).
+
+Fixes Folia scheduling, event phase progression, standalone scheduling without Redis, reward claims, configuration loading, and distribution packaging. Build and distribution checks pass with 54 unit tests.
 
 Install the complete `ValorSky-SkySignals-2.0.5.jar`; the `-plain.jar` does not include runtime dependencies. Stop the server before replacing older versions.
 

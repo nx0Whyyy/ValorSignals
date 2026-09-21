@@ -174,6 +174,34 @@ public class Config {
         return config.getStringList("events-config.meteor.allowed-blocks");
     }
 
+    public boolean isMeteorModelEnabled() {
+        return config.getBoolean("events-config.meteor.model.enabled", true);
+    }
+
+    public Material getMeteorModelItem() {
+        Material material = Material.matchMaterial(
+                config.getString("events-config.meteor.model.item", "PAPER"));
+        return material != null && material.isItem() ? material : Material.PAPER;
+    }
+
+    public String getMeteorItemModel() {
+        return config.getString("events-config.meteor.model.item-model", "skysignals:meteor");
+    }
+
+    public float getMeteorModelScale() {
+        return (float) Math.max(0.1, Math.min(8.0,
+                config.getDouble("events-config.meteor.model.scale", 1.0)));
+    }
+
+    public float getMeteorRotationSpeed() {
+        return (float) config.getDouble("events-config.meteor.model.rotation-speed", 12.0);
+    }
+
+    public double getMeteorDescentSpeed() {
+        return Math.max(0.1, Math.min(5.0,
+                config.getDouble("events-config.meteor.model.descent-speed", 1.5)));
+    }
+
     public int getMobInvasionMaxMobs() {
         return config.getInt("events-config.mob_invasion.max-mobs", 20);
     }
