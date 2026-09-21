@@ -39,11 +39,17 @@ public class Config {
     }
 
     public String resourcePackUrl() {
-        return config.getString("resource-pack.url", "");
+        String url = config.getString("resource-pack.url", "");
+        if (url.endsWith("ValorSky-SkySignals-ResourcePack-2.1.4.zip")) {
+            return url.replace("2.1.4.zip", "2.1.5.zip");
+        }
+        return url;
     }
 
     public String resourcePackSha1() {
-        return config.getString("resource-pack.sha1", "");
+        String hash = config.getString("resource-pack.sha1", "");
+        return hash.equalsIgnoreCase("6ea662b80c77fd2c36156bb48d378ac27f813d7d")
+                ? "a11af4ca0e8d65349d1556dd2eab932a1deff40b" : hash;
     }
 
     public boolean resourcePackRequired() {

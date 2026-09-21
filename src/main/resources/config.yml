@@ -6,8 +6,8 @@ debug: false
 # Pack client requis pour afficher le modèle 3D de la météorite.
 resource-pack:
   enabled: true
-  url: "https://raw.githubusercontent.com/nx0Whyyy/ValorSignals/main/downloads/ValorSky-SkySignals-ResourcePack-2.1.4.zip"
-  sha1: "6ea662b80c77fd2c36156bb48d378ac27f813d7d"
+  url: "https://raw.githubusercontent.com/nx0Whyyy/ValorSignals/main/downloads/ValorSky-SkySignals-ResourcePack-2.1.5.zip"
+  sha1: "a11af4ca0e8d65349d1556dd2eab932a1deff40b"
   required: true
 
 scheduler:

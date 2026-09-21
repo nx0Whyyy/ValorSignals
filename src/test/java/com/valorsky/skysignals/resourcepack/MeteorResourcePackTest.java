@@ -24,23 +24,30 @@ class MeteorResourcePackTest {
 
         var definition = JsonParser.parseString(Files.readString(
                 PACK.resolve("assets/skysignals/items/meteor.json"))).getAsJsonObject();
-        assertEquals("skysignals:item/meteor",
+        assertEquals("skysignals:item/meteor_flight",
                 definition.getAsJsonObject("model").get("model").getAsString());
     }
 
     @Test
-    void convertedModelKeepsEveryObjCuboidAndHasAValidTexture() throws Exception {
+    void flightModelUsesClientSafeElementsAndHasAValidTexture() throws Exception {
         var model = JsonParser.parseString(Files.readString(
-                PACK.resolve("assets/skysignals/models/item/meteor.json"))).getAsJsonObject();
-        assertEquals(46, model.getAsJsonArray("elements").size());
+                PACK.resolve("assets/skysignals/models/item/meteor_flight.json"))).getAsJsonObject();
+        assertEquals(13, model.getAsJsonArray("elements").size());
         assertTrue(model.getAsJsonArray("elements").asList().stream()
                 .allMatch(element -> element.getAsJsonObject().getAsJsonObject("faces").size() == 6));
-        assertEquals("skysignals:item/meteor",
-                model.getAsJsonObject("textures").get("meteor").getAsString());
+        assertTrue(model.getAsJsonArray("elements").asList().stream()
+                .filter(element -> element.getAsJsonObject().has("rotation"))
+                .allMatch(element -> {
+                    var rotation = element.getAsJsonObject().getAsJsonObject("rotation");
+                    return rotation.has("axis") && rotation.has("angle")
+                            && !rotation.has("x") && !rotation.has("y") && !rotation.has("z");
+                }));
+        assertEquals("skysignals:item/meteor_flight",
+                model.getAsJsonObject("textures").get("rock").getAsString());
 
-        var texture = ImageIO.read(PACK.resolve("assets/skysignals/textures/item/meteor.png").toFile());
+        var texture = ImageIO.read(PACK.resolve("assets/skysignals/textures/item/meteor_flight.png").toFile());
         assertNotNull(texture);
-        assertEquals(256, texture.getWidth());
-        assertEquals(256, texture.getHeight());
+        assertEquals(32, texture.getWidth());
+        assertEquals(32, texture.getHeight());
     }
 }
