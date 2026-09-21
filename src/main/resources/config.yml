@@ -3,6 +3,13 @@ server:
 
 debug: false
 
+# Pack client requis pour afficher le modèle 3D de la météorite.
+resource-pack:
+  enabled: true
+  url: "https://raw.githubusercontent.com/nx0Whyyy/ValorSignals/main/downloads/ValorSky-SkySignals-ResourcePack-2.1.4.zip"
+  sha1: "6ea662b80c77fd2c36156bb48d378ac27f813d7d"
+  required: true
+
 scheduler:
   enabled: true
   min-interval: 300

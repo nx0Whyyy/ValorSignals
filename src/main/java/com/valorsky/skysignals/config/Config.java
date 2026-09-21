@@ -34,6 +34,22 @@ public class Config {
         return config.getBoolean("debug", false);
     }
 
+    public boolean resourcePackEnabled() {
+        return config.getBoolean("resource-pack.enabled", true);
+    }
+
+    public String resourcePackUrl() {
+        return config.getString("resource-pack.url", "");
+    }
+
+    public String resourcePackSha1() {
+        return config.getString("resource-pack.sha1", "");
+    }
+
+    public boolean resourcePackRequired() {
+        return config.getBoolean("resource-pack.required", true);
+    }
+
     public boolean schedulerEnabled() {
         return config.getBoolean("scheduler.enabled", true);
     }

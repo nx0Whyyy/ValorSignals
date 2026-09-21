@@ -16,6 +16,7 @@ import com.valorsky.skysignals.event.impl.*;
 import com.valorsky.skysignals.island.DefaultIslandProvider;
 import com.valorsky.skysignals.island.IslandProvider;
 import com.valorsky.skysignals.listener.EventListener;
+import com.valorsky.skysignals.listener.ResourcePackListener;
 import com.valorsky.skysignals.model.SkyEventType;
 import com.valorsky.skysignals.notification.ActionBarService;
 import com.valorsky.skysignals.notification.BossBarService;
@@ -190,6 +191,7 @@ public final class SkySignalsPlugin extends JavaPlugin {
         getCommand("skysignals").setTabCompleter(cmd);
 
         getServer().getPluginManager().registerEvents(new EventListener(this, eventManager), this);
+        getServer().getPluginManager().registerEvents(new ResourcePackListener(this, config), this);
 
         scheduler.start();
 
