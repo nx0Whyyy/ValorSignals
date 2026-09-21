@@ -75,6 +75,14 @@ events-config:
       radius: 8
       depth: 4
       chest-enabled: true
+      chests:
+        minimum: 3
+        maximum: 12
+        hidden-chance: 0.55
+        maximum-hidden-depth: 7
+        main-loot-multiplier: 2.0
+        secondary-loot-min-multiplier: 0.25
+        secondary-loot-max-multiplier: 0.65
       restoration:
         enabled: true
         delay-minutes: 20

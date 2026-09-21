@@ -1,8 +1,8 @@
 # ValorSky SkySignals
 
-**Version 2.3.0** — Dynamic celestial events for the ValorSky Minecraft network, targeting **Folia 1.21.11**.
+**Version 2.4.0** — Dynamic celestial events for the ValorSky Minecraft network, targeting **Folia 1.21.11**.
 
-## Version 2.3.0
+## Version 2.4.0
 
 All six event types expose their actual destination or affected worlds in chat and `/skysignals active`. Meteor and sky chest messages show block coordinates and world; invasion and mineral rain messages include the zone radius. Storm and growth boost list affected worlds without inventing a landing point. Locations appear once when ready and again on impact/landing. Existing `messages.yml` files use built-in defaults for the new `location.*` keys.
 
@@ -10,7 +10,7 @@ Chat durations now render as `2 min 49 s`; duplicate meteor warnings are removed
 
 ## 3D meteor model
 
-Version 2.3.0 drops the supplied meteor in five seconds at scale 3, then creates a crater at least one chunk wide with volcanic rock, an obsidian core and a guaranteed loot chest. When restoration is enabled, every changed block and container inventory is captured before impact and restored after 20 configurable minutes. WorldGuard regions remain protected. The client pack remains the automatically distributed 2.1.6 pack.
+Version 2.4.0 creates between 3 and 12 treasure chests per crater. The visible central nucleus contains every configured reward at double quantity and is surrounded by obsidian with four contained lava pockets. Secondary caches have lighter randomized loot; some are visible and others are buried up to seven blocks deep. Every chest participates in the timed terrain restoration. The client pack remains the automatically distributed 2.1.6 pack.
 
 The plugin sends the versioned pack automatically when a player joins and reports download failures in chat and the server log. The URL, SHA-1 and required status are configurable under `resource-pack`. The plugin renders `skysignals:meteor` with an animated `ItemDisplay`; its material, scale, rotation, 20-second descent, starting height and approach distance are configurable under `events-config.meteor.model`.
 

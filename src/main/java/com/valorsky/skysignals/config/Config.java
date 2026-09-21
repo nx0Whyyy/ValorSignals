@@ -223,6 +223,41 @@ public class Config {
         return config.getBoolean("events-config.meteor.crater.chest-enabled", true);
     }
 
+    public int getMeteorMinimumChests() {
+        return Math.max(3, Math.min(12,
+                config.getInt("events-config.meteor.crater.chests.minimum", 3)));
+    }
+
+    public int getMeteorMaximumChests() {
+        return Math.max(getMeteorMinimumChests(), Math.min(12,
+                config.getInt("events-config.meteor.crater.chests.maximum", 12)));
+    }
+
+    public double getMeteorHiddenChestChance() {
+        return Math.max(0.0, Math.min(1.0,
+                config.getDouble("events-config.meteor.crater.chests.hidden-chance", 0.55)));
+    }
+
+    public int getMeteorMaximumHiddenDepth() {
+        return Math.max(1, Math.min(7,
+                config.getInt("events-config.meteor.crater.chests.maximum-hidden-depth", 7)));
+    }
+
+    public double getMeteorMainLootMultiplier() {
+        return Math.max(1.0, Math.min(5.0,
+                config.getDouble("events-config.meteor.crater.chests.main-loot-multiplier", 2.0)));
+    }
+
+    public double getMeteorSecondaryLootMinMultiplier() {
+        return Math.max(0.1, Math.min(1.0,
+                config.getDouble("events-config.meteor.crater.chests.secondary-loot-min-multiplier", 0.25)));
+    }
+
+    public double getMeteorSecondaryLootMaxMultiplier() {
+        return Math.max(getMeteorSecondaryLootMinMultiplier(), Math.min(1.0,
+                config.getDouble("events-config.meteor.crater.chests.secondary-loot-max-multiplier", 0.65)));
+    }
+
     public Map<Material, Integer> getMeteorChestLoot() {
         Map<Material, Integer> loot = new LinkedHashMap<>();
         var section = config.getConfigurationSection("events-config.meteor.crater.loot");

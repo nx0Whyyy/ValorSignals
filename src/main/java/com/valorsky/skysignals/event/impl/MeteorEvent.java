@@ -448,13 +448,14 @@ public final class MeteorEvent extends AbstractSkyEvent {
     private void buildCoreAndChest(Location core) {
         World world = core.getWorld();
         int y = core.getBlockY();
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
                 if (dx == 0 && dz == 0) continue;
+                boolean lavaPocket = (Math.abs(dx) == 2 && dz == 0) || (Math.abs(dz) == 2 && dx == 0);
                 Location ringBlock = new Location(world, core.getBlockX() + dx, y, core.getBlockZ() + dz);
                 FoliaScheduler.runRegion(plugin, ringBlock, () -> {
                     captureOriginal(ringBlock.getBlock());
-                    ringBlock.getBlock().setType(Material.OBSIDIAN, false);
+                    ringBlock.getBlock().setType(lavaPocket ? Material.LAVA : Material.OBSIDIAN, false);
                 });
             }
         }
@@ -462,20 +463,75 @@ public final class MeteorEvent extends AbstractSkyEvent {
         captureOriginal(nucleus);
         nucleus.setType(Material.CRYING_OBSIDIAN, false);
         if (!config.meteorChestEnabled()) return;
-        Block chestBlock = world.getBlockAt(core.getBlockX(), y + 1, core.getBlockZ());
+        placeTreasureChest(core.clone().add(0, 1, 0), true, false);
+        spawnSecondaryChests(core);
+    }
+
+    private void spawnSecondaryChests(Location core) {
+        int total = random.nextInt(config.getMeteorMaximumChests() - config.getMeteorMinimumChests() + 1)
+                + config.getMeteorMinimumChests();
+        int radius = config.getMeteorCraterRadius();
+        int surfaceY = meteorTarget.getBlockY() - 1;
+        Set<String> positions = new HashSet<>();
+        positions.add(core.getBlockX() + ":" + (core.getBlockY() + 1) + ":" + core.getBlockZ());
+        int created = 1;
+        int attempts = 0;
+        while (created < total && attempts++ < 300) {
+            int dx = random.nextInt(radius * 2 + 1) - radius;
+            int dz = random.nextInt(radius * 2 + 1) - radius;
+            double distance = Math.sqrt(dx * dx + dz * dz);
+            if (distance < 3.0 || distance > radius) continue;
+            boolean hidden = random.nextDouble() < config.getMeteorHiddenChestChance();
+            int y;
+            if (hidden) {
+                y = surfaceY - 1 - random.nextInt(config.getMeteorMaximumHiddenDepth());
+            } else {
+                int depth = Math.max(1, (int) Math.round(config.getMeteorCraterDepth()
+                        * (1.0 - distance / (radius + 0.5))));
+                y = surfaceY - depth + 1;
+            }
+            int x = core.getBlockX() + dx;
+            int z = core.getBlockZ() + dz;
+            if (!positions.add(x + ":" + y + ":" + z)) continue;
+            Location chestLocation = new Location(core.getWorld(), x, y, z);
+            FoliaScheduler.runRegion(plugin, chestLocation,
+                    () -> placeTreasureChest(chestLocation, false, hidden));
+            created++;
+        }
+        logger.info("Created " + created + " meteor treasure chests for event " + id);
+    }
+
+    private void placeTreasureChest(Location location, boolean main, boolean hidden) {
+        Block chestBlock = location.getBlock();
         captureOriginal(chestBlock);
         chestBlock.setType(Material.CHEST, false);
         if (chestBlock.getState() instanceof Chest chest) {
-            chest.setCustomName("Noyau de météorite");
-            List<Integer> slots = new ArrayList<>();
-            for (int slot = 0; slot < chest.getInventory().getSize(); slot++) slots.add(slot);
-            Collections.shuffle(slots, random);
-            int index = 0;
-            for (Map.Entry<Material, Integer> entry : config.getMeteorChestLoot().entrySet()) {
-                if (index >= slots.size()) break;
-                chest.getInventory().setItem(slots.get(index++), new ItemStack(entry.getKey(), entry.getValue()));
-            }
+            chest.setCustomName(main ? "Noyau de météorite"
+                    : hidden ? "Fragment météoritique enfoui" : "Cache météoritique");
+            fillMeteorChest(chest, main);
             chest.update(true, false);
+        }
+    }
+
+    private void fillMeteorChest(Chest chest, boolean main) {
+        List<Integer> slots = new ArrayList<>();
+        for (int slot = 0; slot < chest.getInventory().getSize(); slot++) slots.add(slot);
+        Collections.shuffle(slots, random);
+        double multiplier = main ? config.getMeteorMainLootMultiplier()
+                : config.getMeteorSecondaryLootMinMultiplier() + random.nextDouble()
+                * (config.getMeteorSecondaryLootMaxMultiplier() - config.getMeteorSecondaryLootMinMultiplier());
+        int slotIndex = 0;
+        for (Map.Entry<Material, Integer> entry : config.getMeteorChestLoot().entrySet()) {
+            if (!main && random.nextDouble() > 0.60) continue;
+            int remaining = Math.max(1, (int) Math.round(entry.getValue() * multiplier));
+            while (remaining > 0 && slotIndex < slots.size()) {
+                int amount = Math.min(remaining, entry.getKey().getMaxStackSize());
+                chest.getInventory().setItem(slots.get(slotIndex++), new ItemStack(entry.getKey(), amount));
+                remaining -= amount;
+            }
+        }
+        if (!main && slotIndex == 0) {
+            chest.getInventory().setItem(slots.getFirst(), new ItemStack(Material.IRON_INGOT, 3));
         }
     }
 

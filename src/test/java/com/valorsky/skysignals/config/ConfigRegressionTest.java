@@ -18,6 +18,10 @@ class ConfigRegressionTest {
         assertTrue(config.meteorRestorationEnabled());
         assertEquals(20, config.getMeteorRestorationDelayMinutes());
         assertFalse(config.getMeteorChestLoot().isEmpty());
+        assertEquals(3, config.getMeteorMinimumChests());
+        assertEquals(12, config.getMeteorMaximumChests());
+        assertEquals(7, config.getMeteorMaximumHiddenDepth());
+        assertEquals(2.0, config.getMeteorMainLootMultiplier());
     }
 
     @Test void eventSettingsUseTheShippedUnderscoreKeys() {
