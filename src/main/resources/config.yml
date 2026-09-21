@@ -64,9 +64,9 @@ events-config:
     allowed-blocks: []
     model:
       enabled: true
-      item: PAPER
+      item: MAGMA_BLOCK
       item-model: "skysignals:meteor"
-      scale: 2.25
+      scale: 5.0
       rotation-speed: 4.0
       descent-duration: 20
       start-height: 100.0

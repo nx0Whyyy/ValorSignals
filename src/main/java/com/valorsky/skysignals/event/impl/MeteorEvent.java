@@ -227,12 +227,14 @@ public final class MeteorEvent extends AbstractSkyEvent {
             display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.FIXED);
             display.setBillboard(Display.Billboard.FIXED);
             display.setBrightness(new Display.Brightness(15, 15));
+            display.setGlowing(true);
+            display.setGlowColorOverride(Color.fromRGB(255, 85, 0));
             display.setTeleportDuration(1);
             display.setInterpolationDuration(1);
             display.setViewRange(4.0f);
-            display.setDisplayWidth(12.0f);
-            display.setDisplayHeight(12.0f);
-            display.setShadowRadius(2.0f);
+            display.setDisplayWidth(24.0f);
+            display.setDisplayHeight(24.0f);
+            display.setShadowRadius(4.0f);
             display.setShadowStrength(0.8f);
 
             ItemStack item = new ItemStack(config.getMeteorModelItem());

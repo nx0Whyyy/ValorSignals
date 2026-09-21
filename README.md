@@ -1,8 +1,8 @@
 # ValorSky SkySignals
 
-**Version 2.1.2** — Dynamic celestial events for the ValorSky Minecraft network, targeting **Folia 1.21.11**.
+**Version 2.1.3** — Dynamic celestial events for the ValorSky Minecraft network, targeting **Folia 1.21.11**.
 
-## Version 2.1.2
+## Version 2.1.3
 
 All six event types expose their actual destination or affected worlds in chat and `/skysignals active`. Meteor and sky chest messages show block coordinates and world; invasion and mineral rain messages include the zone radius. Storm and growth boost list affected worlds without inventing a landing point. Locations appear once when ready and again on impact/landing. Existing `messages.yml` files use built-in defaults for the new `location.*` keys.
 
@@ -10,9 +10,9 @@ Chat durations now render as `2 min 49 s`; duplicate meteor warnings are removed
 
 ## 3D meteor model
 
-Version 2.1.2 includes the supplied meteor model as a separate Minecraft 1.21.11 resource pack. Build everything with `./gradlew build dist`; the client pack is written to `build/distributions/ValorSky-SkySignals-ResourcePack-2.1.2.zip`.
+Version 2.1.3 includes the supplied meteor model as a separate Minecraft 1.21.11 resource pack. Build everything with `./gradlew build dist`; the client pack is written to `build/distributions/ValorSky-SkySignals-ResourcePack-2.1.3.zip`.
 
-Host that ZIP and set its URL and SHA-1 in the server's `server.properties`. The plugin renders `skysignals:meteor` with an animated `ItemDisplay`. Its material, scale, rotation, 20-second diagonal descent, starting height and horizontal approach distance are configurable under `events-config.meteor.model`. Players without the resource pack see the configured base item (`PAPER` by default).
+Host that ZIP and set its URL and SHA-1 in the server's `server.properties`. The plugin renders `skysignals:meteor` with an animated `ItemDisplay`. Its material, scale, rotation, 20-second diagonal descent, starting height and horizontal approach distance are configurable under `events-config.meteor.model`. Players without the resource pack see a visible 3D magma block fallback.
 
 Fixes Folia scheduling, event phase progression, standalone scheduling without Redis, reward claims, configuration loading, and distribution packaging. Build and distribution checks pass with 54 unit tests.
 

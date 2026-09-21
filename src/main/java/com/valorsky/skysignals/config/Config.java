@@ -180,8 +180,10 @@ public class Config {
 
     public Material getMeteorModelItem() {
         Material material = Material.matchMaterial(
-                config.getString("events-config.meteor.model.item", "PAPER"));
-        return material != null && material.isItem() ? material : Material.PAPER;
+                config.getString("events-config.meteor.model.item", "MAGMA_BLOCK"));
+        // PAPER was the old invisible-looking fallback. Migrate it transparently.
+        if (material == Material.PAPER) return Material.MAGMA_BLOCK;
+        return material != null && material.isItem() ? material : Material.MAGMA_BLOCK;
     }
 
     public String getMeteorItemModel() {
@@ -189,8 +191,10 @@ public class Config {
     }
 
     public float getMeteorModelScale() {
-        return (float) Math.max(0.1, Math.min(8.0,
-                config.getDouble("events-config.meteor.model.scale", 2.25)));
+        double scale = config.getDouble("events-config.meteor.model.scale", 5.0);
+        // Upgrade both former defaults so existing installations get the visible size.
+        if (Math.abs(scale - 1.0) < 0.001 || Math.abs(scale - 2.25) < 0.001) scale = 5.0;
+        return (float) Math.max(0.1, Math.min(8.0, scale));
     }
 
     public float getMeteorRotationSpeed() {
