@@ -42,6 +42,7 @@ public final class MeteorEvent extends AbstractSkyEvent {
     private TaskHandle meteorTask;
     private TaskHandle trailTask;
     private float modelRotation;
+    private int descentTick;
     private final AtomicBoolean hasLanded = new AtomicBoolean(false);
     private final Set<UUID> notifiedPlayers = ConcurrentHashMap.newKeySet();
     private final Set<UUID> rewardedPlayers = ConcurrentHashMap.newKeySet();
@@ -140,10 +141,16 @@ public final class MeteorEvent extends AbstractSkyEvent {
 
         FoliaScheduler.runRegion(plugin, meteorTarget, () -> {
             if (cancelled || getStatus() == SkyEventStatus.FINISHED) return;
-            meteorStart = meteorTarget.clone().add(0, 80, 0);
+            double angle = random.nextDouble() * Math.PI * 2.0;
+            double horizontalDistance = config.getMeteorHorizontalDistance();
+            meteorStart = meteorTarget.clone().add(
+                    Math.cos(angle) * horizontalDistance,
+                    config.getMeteorStartHeight(),
+                    Math.sin(angle) * horizontalDistance);
+            descentTick = 0;
             meteorDisplay = spawnMeteorDisplay(meteorStart);
 
-            soundService.play("meteor_warning", meteorStart, getNearbyPlayers(meteorStart, 48));
+            soundService.play("meteor_warning", meteorTarget, getNearbyPlayers(meteorTarget, 160));
 
             trailTask = FoliaScheduler.runEntityRepeating(plugin, meteorDisplay, () -> {
                 if (meteorDisplay == null || !meteorDisplay.isValid() || hasLanded.get()) {
@@ -151,7 +158,7 @@ public final class MeteorEvent extends AbstractSkyEvent {
                     return;
                 }
                 Location loc = meteorDisplay.getLocation();
-                List<Player> audience = getNearbyPlayers(loc, 48);
+                List<Player> audience = getNearbyPlayers(loc, 160);
                 if (!audience.isEmpty()) {
                     particleService.spawnMeteorTrail(meteorStart, loc, Particle.FLAME, 10, 0.01, audience);
                 }
@@ -163,17 +170,25 @@ public final class MeteorEvent extends AbstractSkyEvent {
                     return;
                 }
                 Location loc = meteorDisplay.getLocation();
-                List<Player> audience = getNearbyPlayers(loc, 48);
+                List<Player> audience = getNearbyPlayers(loc, 160);
                 if (!audience.isEmpty()) {
                     particleService.spawnCircle(loc, Particle.FLAME, 2, 5, 0.01, audience);
                 }
 
-                if (loc.getY() <= meteorTarget.getY() + 1.5) {
+                int totalTicks = config.getMeteorDescentDuration() * 20;
+                descentTick++;
+                if (descentTick >= totalTicks) {
                     handleImpact();
                     return;
                 }
                 rotateMeteor();
-                meteorDisplay.teleportAsync(loc.clone().add(0, -config.getMeteorDescentSpeed(), 0));
+                double progress = descentTick / (double) totalTicks;
+                Location impactPoint = meteorTarget.clone().add(0, 1.25, 0);
+                Location next = meteorStart.clone().add(
+                        (impactPoint.getX() - meteorStart.getX()) * progress,
+                        (impactPoint.getY() - meteorStart.getY()) * progress,
+                        (impactPoint.getZ() - meteorStart.getZ()) * progress);
+                meteorDisplay.teleportAsync(next);
             }, 1L, 1L);
 
             logger.info("Meteor descent started at " + meteorStart.getWorld().getName());
@@ -188,8 +203,11 @@ public final class MeteorEvent extends AbstractSkyEvent {
             display.setBrightness(new Display.Brightness(15, 15));
             display.setTeleportDuration(1);
             display.setInterpolationDuration(1);
-            display.setDisplayWidth(8.0f);
-            display.setDisplayHeight(8.0f);
+            display.setViewRange(4.0f);
+            display.setDisplayWidth(12.0f);
+            display.setDisplayHeight(12.0f);
+            display.setShadowRadius(2.0f);
+            display.setShadowStrength(0.8f);
 
             ItemStack item = new ItemStack(config.getMeteorModelItem());
             ItemMeta meta = item.getItemMeta();

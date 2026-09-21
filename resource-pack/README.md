@@ -3,8 +3,9 @@
 This pack targets Minecraft Java 1.21.11 (resource pack format 75).
 
 The meteor uses the item model `skysignals:meteor`. SkySignals applies that
-model to a `PAPER` item shown by an `ItemDisplay`; the material, scale, rotation
-and descent speed can be changed in `events-config.meteor.model`.
+model to a `PAPER` item shown by an `ItemDisplay`; the material, scale, rotation,
+descent duration and approach trajectory can be changed in
+`events-config.meteor.model`.
 
 Build the client pack with:
 

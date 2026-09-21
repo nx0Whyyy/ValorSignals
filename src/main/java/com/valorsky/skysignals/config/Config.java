@@ -190,16 +190,26 @@ public class Config {
 
     public float getMeteorModelScale() {
         return (float) Math.max(0.1, Math.min(8.0,
-                config.getDouble("events-config.meteor.model.scale", 1.0)));
+                config.getDouble("events-config.meteor.model.scale", 2.25)));
     }
 
     public float getMeteorRotationSpeed() {
         return (float) config.getDouble("events-config.meteor.model.rotation-speed", 12.0);
     }
 
-    public double getMeteorDescentSpeed() {
-        return Math.max(0.1, Math.min(5.0,
-                config.getDouble("events-config.meteor.model.descent-speed", 1.5)));
+    public int getMeteorDescentDuration() {
+        return Math.max(5, Math.min(60,
+                config.getInt("events-config.meteor.model.descent-duration", 20)));
+    }
+
+    public double getMeteorStartHeight() {
+        return Math.max(40.0, Math.min(200.0,
+                config.getDouble("events-config.meteor.model.start-height", 100.0)));
+    }
+
+    public double getMeteorHorizontalDistance() {
+        return Math.max(0.0, Math.min(200.0,
+                config.getDouble("events-config.meteor.model.horizontal-distance", 80.0)));
     }
 
     public int getMobInvasionMaxMobs() {
