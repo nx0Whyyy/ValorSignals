@@ -14,6 +14,8 @@ import org.bukkit.*;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
+import org.bukkit.block.Block;
+import org.bukkit.block.Chest;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -154,20 +156,37 @@ public final class MeteorEvent extends AbstractSkyEvent {
 
     private void startMeteorDescent() {
         if (meteorTarget == null) return;
+        Location requestedTarget = meteorTarget.clone();
+        FoliaScheduler.runRegion(plugin, requestedTarget, () -> {
+            meteorTarget = resolveGround(requestedTarget);
+            boolean testAtPlayer = forcedTarget != null;
+            double angle = random.nextDouble() * Math.PI * 2.0;
+            double horizontalDistance = testAtPlayer ? 0.0 : config.getMeteorHorizontalDistance();
+            double startHeight = testAtPlayer
+                    ? Math.min(config.getMeteorStartHeight(), Math.max(24.0, config.viewDistance() * 0.75))
+                    : config.getMeteorStartHeight();
+            Location start = meteorTarget.clone().add(
+                    Math.cos(angle) * horizontalDistance,
+                    startHeight,
+                    Math.sin(angle) * horizontalDistance);
+            FoliaScheduler.runRegion(plugin, start, () -> spawnDescendingMeteor(start));
+        });
+    }
 
-        boolean testAtPlayer = forcedTarget != null;
-        double angle = random.nextDouble() * Math.PI * 2.0;
-        double horizontalDistance = testAtPlayer ? 0.0 : config.getMeteorHorizontalDistance();
-        double startHeight = testAtPlayer
-                ? Math.min(config.getMeteorStartHeight(), Math.max(24.0, config.viewDistance() * 0.75))
-                : config.getMeteorStartHeight();
-        Location start = meteorTarget.clone().add(
-                Math.cos(angle) * horizontalDistance,
-                startHeight,
-                Math.sin(angle) * horizontalDistance);
+    private Location resolveGround(Location requested) {
+        World world = requested.getWorld();
+        int x = requested.getBlockX();
+        int z = requested.getBlockZ();
+        int startY = Math.min(world.getMaxHeight() - 1, requested.getBlockY());
+        for (int y = startY; y >= world.getMinHeight(); y--) {
+            if (world.getBlockAt(x, y, z).getType().isSolid()) {
+                return new Location(world, x + 0.5, y + 1.0, z + 0.5);
+            }
+        }
+        return requested.clone();
+    }
 
-        // Folia requires entity creation to run on the region that owns the spawn location.
-        FoliaScheduler.runRegion(plugin, start, () -> {
+    private void spawnDescendingMeteor(Location start) {
             if (cancelled || getStatus() == SkyEventStatus.FINISHED) return;
             meteorStart = start;
             descentTick = 0;
@@ -201,29 +220,33 @@ public final class MeteorEvent extends AbstractSkyEvent {
 
             meteorTask = FoliaScheduler.runEntityRepeating(plugin, meteorDisplay, () -> {
                 if (meteorDisplay == null || !meteorDisplay.isValid()) {
-                    handleImpact();
+                    cleanupFlight();
                     return;
                 }
                 Location loc = meteorDisplay.getLocation();
 
                 int totalTicks = config.getMeteorDescentDuration() * 20;
                 descentTick++;
-                if (descentTick >= totalTicks) {
-                    handleImpact();
-                    return;
-                }
                 rotateMeteor();
-                double progress = descentTick / (double) totalTicks;
-                Location impactPoint = meteorTarget.clone().add(0, 1.25, 0);
+                double progress = Math.min(1.0, descentTick / (double) totalTicks);
+                // The supplied flight cube occupies 14/16 of a model block. Position its
+                // lowest rendered point exactly on the resolved solid surface.
+                double renderedHalfHeight = config.getMeteorModelScale() * 0.4375;
+                Location impactPoint = meteorTarget.clone().add(0, renderedHalfHeight - 1.0, 0);
                 Location next = meteorStart.clone().add(
                         (impactPoint.getX() - meteorStart.getX()) * progress,
                         (impactPoint.getY() - meteorStart.getY()) * progress,
                         (impactPoint.getZ() - meteorStart.getZ()) * progress);
-                meteorDisplay.teleportAsync(next);
+                if (progress >= 1.0) {
+                    ItemDisplay display = meteorDisplay;
+                    meteorTask.cancel();
+                    display.teleportAsync(impactPoint).thenRun(this::handleImpact);
+                } else {
+                    meteorDisplay.teleportAsync(next);
+                }
             }, 1L, 1L);
 
             logger.info("Meteor descent started at " + meteorStart.getWorld().getName());
-        });
     }
 
     private ItemDisplay spawnMeteorDisplay(Location location) {
@@ -335,9 +358,11 @@ public final class MeteorEvent extends AbstractSkyEvent {
             soundService.play("meteor_impact", meteorTarget, audience);
 
             if (config.getMeteorTerrainDestruction()) {
-                world.createExplosion(meteorTarget, 2.0f, false, false);
-            } else {
-                world.createExplosion(meteorTarget, 0.0f, false, false);
+                if (isWorldGuardProtected(meteorTarget)) {
+                    logger.info("Meteor crater skipped inside a WorldGuard region at " + formatLocation(meteorTarget));
+                } else {
+                    createCrater();
+                }
             }
 
             for (Player player : world.getPlayers()) {
@@ -348,11 +373,100 @@ public final class MeteorEvent extends AbstractSkyEvent {
                     }
                 }
             }
-
-            // Terrain edits are intentionally excluded from the visual impact.
         }
 
         notificationService.notifyEventPhase(this, "impact");
+    }
+
+    private boolean isWorldGuardProtected(Location location) {
+        if (!config.meteorProtectWorldGuardRegions()
+                || !Bukkit.getPluginManager().isPluginEnabled("WorldGuard")) return false;
+        try {
+            Class<?> worldGuardClass = Class.forName("com.sk89q.worldguard.WorldGuard");
+            Object worldGuard = worldGuardClass.getMethod("getInstance").invoke(null);
+            Object platform = worldGuardClass.getMethod("getPlatform").invoke(worldGuard);
+            Object container = platform.getClass().getMethod("getRegionContainer").invoke(platform);
+            Object query = container.getClass().getMethod("createQuery").invoke(container);
+            Class<?> adapter = Class.forName("com.sk89q.worldedit.bukkit.BukkitAdapter");
+            Object adapted = adapter.getMethod("adapt", Location.class).invoke(null, location);
+            var method = Arrays.stream(query.getClass().getMethods())
+                    .filter(candidate -> candidate.getName().equals("getApplicableRegions")
+                            && candidate.getParameterCount() == 1
+                            && candidate.getParameterTypes()[0].isInstance(adapted))
+                    .findFirst().orElseThrow();
+            Object regions = method.invoke(query, adapted);
+            return ((Number) regions.getClass().getMethod("size").invoke(regions)).intValue() > 0;
+        } catch (Exception error) {
+            logger.log(java.util.logging.Level.WARNING,
+                    "Could not verify WorldGuard protection; crater creation was blocked for safety", error);
+            return true;
+        }
+    }
+
+    private void createCrater() {
+        int radius = config.getMeteorCraterRadius();
+        int maxDepth = config.getMeteorCraterDepth();
+        int surfaceY = meteorTarget.getBlockY() - 1;
+        World world = meteorTarget.getWorld();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                double distance = Math.sqrt(dx * dx + dz * dz);
+                if (distance > radius) continue;
+                int depth = Math.max(1, (int) Math.round(maxDepth * (1.0 - distance / (radius + 0.5))));
+                int floorY = surfaceY - depth;
+                int x = meteorTarget.getBlockX() + dx;
+                int z = meteorTarget.getBlockZ() + dz;
+                Location column = new Location(world, x, floorY, z);
+                FoliaScheduler.runRegion(plugin, column, () -> {
+                    for (int y = floorY + 1; y <= surfaceY + 1; y++) {
+                        world.getBlockAt(x, y, z).setType(Material.AIR, false);
+                    }
+                    world.getBlockAt(x, floorY, z).setType(craterFloorMaterial(distance), false);
+                });
+            }
+        }
+        Location core = new Location(world, meteorTarget.getBlockX(), surfaceY - maxDepth, meteorTarget.getBlockZ());
+        FoliaScheduler.runRegionDelayed(plugin, core, () -> buildCoreAndChest(core), 3L);
+    }
+
+    private Material craterFloorMaterial(double distance) {
+        if (distance <= 1.5) return Material.OBSIDIAN;
+        if (distance <= 2.75) return random.nextBoolean() ? Material.CRYING_OBSIDIAN : Material.MAGMA_BLOCK;
+        Material[] rock = {Material.BLACKSTONE, Material.BASALT, Material.TUFF, Material.DEEPSLATE};
+        return rock[random.nextInt(rock.length)];
+    }
+
+    private void buildCoreAndChest(Location core) {
+        World world = core.getWorld();
+        int y = core.getBlockY();
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) continue;
+                Location ringBlock = new Location(world, core.getBlockX() + dx, y, core.getBlockZ() + dz);
+                FoliaScheduler.runRegion(plugin, ringBlock,
+                        () -> ringBlock.getBlock().setType(Material.OBSIDIAN, false));
+            }
+        }
+        world.getBlockAt(core.getBlockX(), y, core.getBlockZ()).setType(Material.CRYING_OBSIDIAN, false);
+        if (!config.meteorChestEnabled()) return;
+        Block chestBlock = world.getBlockAt(core.getBlockX(), y + 1, core.getBlockZ());
+        chestBlock.setType(Material.CHEST, false);
+        if (chestBlock.getState() instanceof Chest chest) {
+            List<Integer> slots = new ArrayList<>();
+            for (int slot = 0; slot < chest.getInventory().getSize(); slot++) slots.add(slot);
+            Collections.shuffle(slots, random);
+            int index = 0;
+            for (Map.Entry<Material, Integer> entry : config.getMeteorChestLoot().entrySet()) {
+                if (index >= slots.size()) break;
+                chest.getInventory().setItem(slots.get(index++), new ItemStack(entry.getKey(), entry.getValue()));
+            }
+            chest.update(true, false);
+        }
+    }
+
+    private String formatLocation(Location location) {
+        return location.getWorld().getName() + " " + location.getBlockX() + ","
+                + location.getBlockY() + "," + location.getBlockZ();
     }
 
     private List<Player> getNearbyPlayers(Location center, double radius) {

@@ -195,7 +195,36 @@ public class Config {
     }
 
     public boolean getMeteorTerrainDestruction() {
-        return config.getBoolean("events-config.meteor.terrain-destruction", false);
+        return config.getBoolean("events-config.meteor.crater.enabled", true);
+    }
+
+    public boolean meteorProtectWorldGuardRegions() {
+        return config.getBoolean("events-config.meteor.crater.protect-worldguard-regions", true);
+    }
+
+    public int getMeteorCraterRadius() {
+        return Math.max(2, Math.min(12, config.getInt("events-config.meteor.crater.radius", 5)));
+    }
+
+    public int getMeteorCraterDepth() {
+        return Math.max(1, Math.min(8, config.getInt("events-config.meteor.crater.depth", 3)));
+    }
+
+    public boolean meteorChestEnabled() {
+        return config.getBoolean("events-config.meteor.crater.chest-enabled", true);
+    }
+
+    public Map<Material, Integer> getMeteorChestLoot() {
+        Map<Material, Integer> loot = new LinkedHashMap<>();
+        var section = config.getConfigurationSection("events-config.meteor.crater.loot");
+        if (section == null) return loot;
+        for (String key : section.getKeys(false)) {
+            Material material = Material.matchMaterial(key);
+            if (material != null && material.isItem()) {
+                loot.put(material, Math.max(1, Math.min(material.getMaxStackSize(), section.getInt(key, 1))));
+            }
+        }
+        return loot;
     }
 
     public List<String> getMeteorAllowedBlocks() {

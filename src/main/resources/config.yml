@@ -67,8 +67,21 @@ events-config:
     enabled: true
     duration: 180
     warning-duration: 15
-    terrain-destruction: false
+    terrain-destruction: true
     allowed-blocks: []
+    crater:
+      enabled: true
+      protect-worldguard-regions: true
+      radius: 5
+      depth: 3
+      chest-enabled: true
+      loot:
+        DIAMOND: 3
+        EMERALD: 6
+        NETHERITE_SCRAP: 1
+        GOLD_INGOT: 12
+        IRON_INGOT: 24
+        ENCHANTED_GOLDEN_APPLE: 1
     model:
       enabled: true
       item: MAGMA_BLOCK

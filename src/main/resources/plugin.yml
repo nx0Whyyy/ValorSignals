@@ -5,7 +5,7 @@ api-version: '1.21'
 folia-supported: true
 author: ValorSky
 description: Dynamic celestial events for ValorSky
-softdepend: [PlaceholderAPI]
+softdepend: [PlaceholderAPI, WorldGuard]
 commands:
   skysignals:
     description: SkySignals main command
